@@ -1,0 +1,51 @@
+{
+  "name": "confluence-local",
+  "productName": "Confluence Local",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Confluence 문서를 로컬에서 수정하고 업데이트하는 Windows·macOS 데스크톱 앱 (v1: Claude Code)",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
+    "test": "vitest run",
+    "smoke": "electron-vite build && cross-env APP_SMOKE=1 electron .",
+    "rebuild:native": "electron-rebuild -f -w better-sqlite3",
+    "dist": "electron-vite build && electron-builder"
+  },
+  "dependencies": {
+    "@types/hast": "^3.0.5",
+    "@types/mdast": "^4.0.4",
+    "@xmldom/xmldom": "^0.9.12",
+    "better-sqlite3": "^13.0.3",
+    "chokidar": "^5.0.0",
+    "diff": "^9.0.0",
+    "hast-util-sanitize": "^5.0.2",
+    "mdast-util-from-markdown": "^2.0.3",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "rehype-sanitize": "^6.0.0",
+    "rehype-stringify": "^10.0.1",
+    "remark-gfm": "^4.0.1",
+    "remark-parse": "^11.0.0",
+    "remark-rehype": "^11.1.2",
+    "unified": "^11.0.5",
+    "zustand": "^5.0.15"
+  },
+  "devDependencies": {
+    "@electron/rebuild": "^4.2.0",
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^22.20.2",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.1.1",
+    "cross-env": "^10.1.0",
+    "electron": "^44.3.0",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.0",
+    "vitest": "^5.0.0"
+  }
+}

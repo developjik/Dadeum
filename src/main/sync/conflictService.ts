@@ -1,0 +1,119 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import type { ConfluenceClient } from '../../core/confluence/client'
+import { storageToMarkdown } from '../../core/converter/storageToMarkdown'
+import { markdownToStorage } from '../../core/converter/markdownToStorage'
+import { machineFor } from './machines'
+import { fileHashOf } from '../../core/store/hash'
+import type { SyncStateDb } from '../../core/store/syncState'
+import { renderPageFile, parsePageFile } from '../../core/store/workspace'
+
+export type ConflictChoice = 'overwrite' | 'take-remote' | 'manual'
+
+/**
+ * 충돌 3지 선택 처리(ef-8, AC-6 — 안전 우선, 자동 진행 금지):
+ * ① 덮어쓰기 — 최신 원격 버전을 기준 버전으로 로컬 내용 업로드(원격 변경 폐기 경고)
+ * ② 원격 받기 — 로컬 변경은 .sync/trash/<ts>/ 백업 후 원격 판으로 교체
+ * ③ 직접 처리 — 원격 본문을 <file>.remote.md로 생성(allowlist 제외), 사용자 병합 후 재승인
+ */
+export async function resolveConflict(options: {
+  choice: ConflictChoice
+  path: string
+  pageId: string
+  client: ConfluenceClient
+  workspaceRoot: string
+  db: SyncStateDb
+}): Promise<{ applied: ConflictChoice; backupPath?: string; remoteFile?: string }> {
+  const { choice, path, pageId, client, workspaceRoot, db } = options
+  // B-2R: 머신 키는 db의 원본 spaceKey(개인 스페이스는 디렉터리명이 personal-*로 달라짐)
+  const record = db.getPage(pageId)
+  const spaceKey = record?.spaceKey ?? spaceKeyFromPath(path)
+  const machine = machineFor(spaceKey)
+  const absPath = join(workspaceRoot, path)
+
+  if (choice === 'overwrite') {
+    const started = machine.apply('startPush')
+    if (!started.ok) throw new Error('에이전트 실행 중이거나 동기화 중이라 덮어쓸 수 없습니다')
+    try {
+      const raw = readFileSync(absPath, 'utf8')
+      const { meta, body } = parsePageFile(raw)
+      const remote = await client.getPageStorage(pageId) // 최신 원격 버전 = 새 기준 버전
+      const storageValue = markdownToStorage(body)
+      const updated = await client.updatePage({
+        pageId,
+        currentVersion: remote.version,
+        title: meta.title,
+        storageValue
+      })
+      if (updated.version !== remote.version + 1) {
+        throw new Error(`버전 증가 확인 실패: 기대 ${remote.version + 1}, 응답 ${updated.version}`)
+      }
+      const updatedRaw = renderPageFile(
+        { ...meta, version: updated.version, syncedAt: new Date().toISOString() },
+        body
+      )
+      writeFileSync(absPath, updatedRaw, 'utf8')
+      db.upsertPage({
+        pageId,
+        spaceKey: meta.spaceKey,
+        path,
+        title: meta.title,
+        version: updated.version,
+        parentId: meta.parentId,
+        contentHash: fileHashOf(updatedRaw),
+        updatedAt: null
+      })
+      return { applied: 'overwrite' }
+    } finally {
+      machine.apply('endPush')
+    }
+  }
+
+  if (choice === 'take-remote') {
+    const remote = await client.getPageStorage(pageId)
+    const markdown = storageToMarkdown(remote.storageValue).markdown
+    const ts = new Date().toISOString().replace(/[:.]/g, '-')
+    let backupPath: string | undefined
+    if (existsSync(absPath)) {
+      backupPath = join(workspaceRoot, '.sync', 'trash', ts, path.replace(/\/index\.md$/, '.local-backup.md'))
+      mkdirSync(dirname(backupPath), { recursive: true })
+      writeFileSync(backupPath, readFileSync(absPath)) // 로컬 변경 1회 백업(trash는 allowlist 밖)
+    }
+    const updatedRaw = renderPageFile(
+      { ...currentMeta(absPath), version: remote.version, syncedAt: new Date().toISOString() },
+      markdown
+    )
+    writeFileSync(absPath, updatedRaw, 'utf8')
+    db.updateContentHash(pageId, fileHashOf(updatedRaw))
+    db.clearRemoteDeleted(pageId)
+    return { applied: 'take-remote', backupPath }
+  }
+
+  if (choice === 'manual') {
+    const remote = await client.getPageStorage(pageId)
+    const markdown = storageToMarkdown(remote.storageValue).markdown
+    const remoteFile = absPath.replace(/\.md$/, '.remote.md') // allowlist 제외 — 변경 세트 유입 없음(F3)
+    writeFileSync(remoteFile, markdown, 'utf8')
+    return { applied: 'manual', remoteFile }
+  }
+
+  throw new Error(`알 수 없는 충돌 처리 선택: ${String(choice)}`)
+}
+
+function currentMeta(absPath: string): {
+  pageId: string
+  spaceKey: string
+  title: string
+  version: number
+  parentId: string | null
+  url: string
+  updatedAt: string | null
+  syncedAt: string | null
+} {
+  return parsePageFile(readFileSync(absPath, 'utf8')).meta
+}
+
+function spaceKeyFromPath(path: string): string {
+  const parts = path.split('/')
+  return parts.length > 1 ? parts[1] : path
+}
