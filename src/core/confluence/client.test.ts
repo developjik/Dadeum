@@ -46,6 +46,27 @@ describe('ConfluenceClient', () => {
     ).toThrow(/https/)
   })
 
+  it('스킴 없는 호스트는 https로 보정한다', () => {
+    const client = new ConfluenceClient({
+      baseUrl: 'acme.atlassian.net',
+      email: 'a@b.c',
+      apiToken: 't',
+      fetchImpl: async () => jsonResponse({ status: 200, body: spacesPage(['1']) }),
+    })
+    expect(client.identity.baseUrl).toBe('https://acme.atlassian.net')
+  })
+
+  it('지원하지 않는 스킴 입력은 보정하지 않고 거부한다', () => {
+    expect(
+      () =>
+        new ConfluenceClient({
+          baseUrl: 'ftp://acme.atlassian.net',
+          email: 'a@b.c',
+          apiToken: 't',
+        }),
+    ).toThrow(/https/)
+  })
+
   it('_links.next 커서로 모든 스페이스 페이지를 순회한다', async () => {
     const requestedUrls: string[] = []
     const fetchImpl = vi.fn(async (input: Request | string | URL) => {

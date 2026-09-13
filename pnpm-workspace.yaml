@@ -6,7 +6,9 @@ packages: []
 # - lefthook: git 훅 자동 설치(prepare 스크립트와 이중 경로)
 # better-sqlite3 v13은 install 스크립트 자체가 없다(prebuilds 정적 탑재) — 항목 불필요.
 allowBuilds:
+  better-sqlite3: set this to true or false
   electron: true
+  electron-winstaller: set this to true or false
   esbuild: true
   lefthook: true
 

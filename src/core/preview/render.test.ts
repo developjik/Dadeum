@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { ko } from '../i18n/ko'
 import { renderPreviewHtml } from './render'
 
 describe('renderPreviewHtml(AC-8)', () => {
@@ -15,6 +16,27 @@ describe('renderPreviewHtml(AC-8)', () => {
     expect(html).toContain('confluence-placeholder')
     expect(html).toContain('Confluence 요소')
     expect(html).not.toContain('<ac:structured-macro')
+  })
+
+  it('캐리어 종류를 원문 대신 한국어로 요약한다', async () => {
+    const md =
+      '```confluence-storage name=layout id=abc12345\n<ac:layout><ac:layout-section ac:type="two_left_sidebar"></ac:layout-section></ac:layout>\n```'
+    const html = await renderPreviewHtml(md)
+    expect(html).toContain('페이지 레이아웃')
+    expect(html).not.toContain('<ac:layout')
+  })
+
+  it('문서가 캐리어뿐이면 미리보기 제한 안내를 덧붙인다', async () => {
+    const md = '```confluence-storage name=layout id=abc12345\n<ac:layout></ac:layout>\n```'
+    const html = await renderPreviewHtml(md)
+    expect(html).toContain(ko.preview.carrierOnly)
+  })
+
+  it('캐리어 외 본문이 있으면 제한 안내를 붙이지 않는다', async () => {
+    const md =
+      '본문 문단\n\n```confluence-storage name=layout id=abc12345\n<ac:layout></ac:layout>\n```'
+    const html = await renderPreviewHtml(md)
+    expect(html).not.toContain(ko.preview.carrierOnly)
   })
 
   it('스크립트 등 위험 마크업을 제거한다(sanitize)', async () => {

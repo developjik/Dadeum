@@ -31,13 +31,16 @@ export interface AuthIdentity {
 
 function normalizeBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '')
-  if (!/^https:\/\/[a-z0-9.-]+$/i.test(trimmed)) {
+  // 스킴 없이 호스트만 입력하는 경우(colosseum.atlassian.net)가 흔하므로 https로
+  // 보정한다. http 명시 입력은 보정하지 않고 그대로 거부한다(Cloud 전용 https).
+  const withScheme = /^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`
+  if (!/^https:\/\/[a-z0-9.-]+$/i.test(withScheme)) {
     throw new ConfluenceApiError(
       'unexpected',
       `올바르지 않은 사이트 주소: ${baseUrl}(https://xxx.atlassian.net 형식)`,
     )
   }
-  return trimmed
+  return withScheme
 }
 
 function buildBasicAuthHeader(email: string, apiToken: string): string {
