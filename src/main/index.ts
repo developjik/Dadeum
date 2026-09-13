@@ -4,6 +4,7 @@ import { buildCsp } from '../core/security/csp'
 import { isAllowedNavigation } from '../core/security/navigation'
 import { chatRuns, registerAuthAndSpaceHandlers } from './authHandlers'
 import { registerIpcHandlers } from './ipc'
+import { registerUpdaterHandlers } from './updater'
 import { createMainWindow } from './window'
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
@@ -44,7 +45,7 @@ if (!app.requestSingleInstanceLock()) {
     })
 
     registerIpcHandlers()
-    createMainWindow()
+    registerUpdaterHandlers()
     registerAuthAndSpaceHandlers()
 
     app.on('activate', () => {

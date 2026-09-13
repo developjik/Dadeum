@@ -19,3 +19,10 @@ mac:
   target:
     - target: dmg
     - target: zip
+files:
+  - out/**
+  - package.json
+publish:
+  - provider: github
+    # owner/repo는 빌드 시 GH_OWNER/GH_REPO 환경변수(또는 package.json repository)로 해석되며
+    # 결과가 app-update.yml에 구워져 들어간다(앱 내 업데이트 버튼이 이 경로를 사용).

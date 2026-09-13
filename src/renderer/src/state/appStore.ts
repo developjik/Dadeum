@@ -7,6 +7,7 @@ import type { ChangeSet } from '../../../core/push/changeSet'
 import type { LineChange } from '../../../core/push/diff'
 import type { PushOutcome } from '../../../core/push/types'
 import type { PageTreeNode } from '../../../core/store/tree'
+import type { UpdateCheckOutcome } from '../../../core/updater/types'
 
 type AuthStatus = 'loading' | 'disconnected' | 'connected'
 
@@ -49,6 +50,11 @@ interface AppUiState {
   agentStarting: boolean
   /** 시작 왕복 중 눌린 중지 — runId 수령 즉시 agent:cancel로 소비한다. */
   agentStartAborted: boolean
+  /** 수동 업데이트 상태(버튼 확인 → 설치 → 재시작). */
+  updateStatus: 'idle' | 'checking' | 'available' | 'up-to-date' | 'unavailable'
+  updateNewVersion?: string
+  updatePhase: 'idle' | 'downloading' | 'restarting'
+  updateProgress?: number
   changeset: ChangeSet | null
   pushOutcome: PushOutcome | null
   conflicts: Array<{ pageId: string; path: string; reason: 'remote-deleted' | 'dirty' }>
@@ -64,9 +70,11 @@ interface AppUiState {
   loadTree: (spaceKey: string) => Promise<void>
   openPage: (path: string) => Promise<void>
   openExternal: (url: string) => Promise<void>
+  cancelAgent: () => Promise<void>
+  checkUpdate: () => Promise<void>
+  installUpdate: () => Promise<void>
   selectSpace: (spaceKey: string) => Promise<void>
   sendChat: (prompt: string) => Promise<void>
-  cancelAgent: () => Promise<void>
   loadChangeset: (spaceKey: string) => Promise<void>
   approveUpload: (spaceKey: string, paths: string[]) => Promise<void>
   openDiff: (path: string) => Promise<void>
@@ -84,6 +92,7 @@ async function api<T>(channel: string, payload?: unknown): Promise<T> {
 
 let agentUnsubscribe: (() => void) | null = null
 let syncUnsubscribe: (() => void) | null = null
+let updateUnsubscribe: (() => void) | null = null
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
 /** openPage 응답 경쟁 가드 — 마지막 선택만 화면에 반영한다. */
 let openPageSeq = 0
@@ -220,6 +229,21 @@ export function ensureAgentEventSubscription(): void {
       }
     })
   }
+  if (!updateUnsubscribe) {
+    updateUnsubscribe = window.confluenceLocal.onUpdateEvent((payload) => {
+      const event = payload as { type?: string; percent?: number; message?: string }
+      if (event?.type === 'progress' && typeof event.percent === 'number') {
+        useAppStore.setState({ updateProgress: event.percent })
+      } else if (event?.type === 'downloaded') {
+        useAppStore.setState({ updatePhase: 'restarting' })
+      } else if (event?.type === 'error') {
+        useAppStore.setState({
+          updatePhase: 'idle',
+          error: ko.update.failed(event.message ?? ''),
+        })
+      }
+    })
+  }
 }
 
 export const useAppStore = create<AppUiState>((set, get) => ({
@@ -232,6 +256,8 @@ export const useAppStore = create<AppUiState>((set, get) => ({
   agentRunning: false,
   agentStarting: false,
   agentStartAborted: false,
+  updateStatus: 'idle',
+  updatePhase: 'idle',
   changeset: null,
   pushOutcome: null,
   diffs: {},
@@ -472,6 +498,41 @@ export const useAppStore = create<AppUiState>((set, get) => ({
       await api('agent:cancel', { runId })
     } catch (cause) {
       set({ error: String(cause instanceof Error ? cause.message : cause) })
+    }
+  },
+
+  checkUpdate: async () => {
+    if (get().updateStatus === 'checking') return
+    set({ updateStatus: 'checking' })
+    try {
+      const result = await api<UpdateCheckOutcome>('update:check')
+      if (result.status === 'available') {
+        set({ updateStatus: 'available', updateNewVersion: result.newVersion })
+      } else if (result.status === 'up-to-date') {
+        set({ updateStatus: 'up-to-date' })
+        showNotice(ko.update.upToDate)
+      } else {
+        set({ updateStatus: 'unavailable' })
+        showNotice(ko.update.unavailable(result.message))
+      }
+    } catch (cause) {
+      set({ updateStatus: 'idle' })
+      showNotice(ko.update.failed(String(cause instanceof Error ? cause.message : cause)))
+    }
+  },
+
+  installUpdate: async () => {
+    if (get().updatePhase !== 'idle') return
+    set({ updatePhase: 'downloading', updateProgress: 0 })
+    try {
+      // 다운로드 완료 후 앱이 재시작되며 이 invoke는 응답을 못 돌려줄 수 있다 —
+      // 진행 상태는 update:event 스트림(progress/downloaded/error)이 담당한다.
+      await api('update:install')
+    } catch (cause) {
+      set({
+        updatePhase: 'idle',
+        error: ko.update.failed(String(cause instanceof Error ? cause.message : cause)),
+      })
     }
   },
 

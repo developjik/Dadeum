@@ -9,6 +9,7 @@ declare global {
         listener: (payload: { runId: string; spaceKey: string; event: unknown }) => void,
       ) => () => void
       onSyncEvent: (listener: (payload: unknown) => void) => () => void
+      onUpdateEvent: (listener: (payload: unknown) => void) => () => void
     }
   }
 }

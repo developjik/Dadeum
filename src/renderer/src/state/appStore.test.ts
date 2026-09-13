@@ -9,6 +9,7 @@ import { ensureAgentEventSubscription, useAppStore } from './appStore'
  */
 const invoke = vi.fn(async (_channel: string, _payload?: unknown): Promise<unknown> => ({}))
 let agentEmit: ((payload: unknown) => void) | null = null
+let updateEmit: ((payload: unknown) => void) | null = null
 
 function spaceKeyOf(payload: unknown): unknown {
   return typeof payload === 'object' && payload !== null && 'spaceKey' in payload
@@ -30,6 +31,9 @@ beforeAll(() => {
       return () => undefined
     },
     onSyncEvent: () => () => undefined,
+    onUpdateEvent: (listener: (payload: unknown) => void) => {
+      updateEmit = listener
+    },
   }
   // DOM Window 타입과 무관한 테스트용 브리지 주입(언체크 캐스트 — 테스트 경계)
   const target = globalThis as unknown as { window: unknown }
@@ -131,5 +135,53 @@ describe('openPage 응답 경쟁 가드', () => {
     await first
 
     expect(useAppStore.getState().selected?.path).toBe('spaces/B/fast/index.md')
+  })
+})
+
+describe('수동 업데이트 흐름', () => {
+  it('확인 → 신규 버전 발견 → 다운로드 진행 → 재시작 상태로 이행한다', async () => {
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'update:check')
+        return { status: 'available', currentVersion: '0.1.0', newVersion: '0.2.0' }
+      if (channel === 'update:install') return { started: true }
+      return {}
+    })
+
+    await useAppStore.getState().checkUpdate()
+    let state = useAppStore.getState()
+    expect(state.updateStatus).toBe('available')
+    expect(state.updateNewVersion).toBe('0.2.0')
+
+    await useAppStore.getState().installUpdate()
+    state = useAppStore.getState()
+    expect(state.updatePhase).toBe('downloading')
+    expect(invoke.mock.calls.some(([channel]) => channel === 'update:install')).toBe(true)
+
+    updateEmit?.({ type: 'progress', percent: 42 })
+    expect(useAppStore.getState().updateProgress).toBe(42)
+
+    updateEmit?.({ type: 'downloaded', version: '0.2.0' })
+    expect(useAppStore.getState().updatePhase).toBe('restarting')
+  })
+
+  it('최신 버전이면 안내만 띄운다', async () => {
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'update:check') return { status: 'up-to-date', currentVersion: '0.1.0' }
+      return {}
+    })
+
+    await useAppStore.getState().checkUpdate()
+
+    const state = useAppStore.getState()
+    expect(state.updateStatus).toBe('up-to-date')
+    expect(state.notice).toContain('최신')
+  })
+
+  it('다운로드 실패 이벤트는 idle로 되돌리고 오류를 표시한다', async () => {
+    useAppStore.setState({ updatePhase: 'downloading' })
+    updateEmit?.({ type: 'error', message: 'network down' })
+    const state = useAppStore.getState()
+    expect(state.updatePhase).toBe('idle')
+    expect(state.error).toContain('업데이트 실패')
   })
 })

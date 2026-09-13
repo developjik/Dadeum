@@ -88,12 +88,15 @@ jobs:
         if: runner.os == 'macOS'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_OWNER: ${{ github.repository_owner }}
+          GH_REPO: ${{ github.event.repository.name }}
         run: pnpm exec electron-builder --mac dmg zip --x64 --arm64 --publish always
-
       - name: Package & upload (Windows, NSIS)
         if: runner.os == 'Windows'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_OWNER: ${{ github.repository_owner }}
+          GH_REPO: ${{ github.event.repository.name }}
         run: pnpm exec electron-builder --win nsis --publish always
 
   publish:

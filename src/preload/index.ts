@@ -35,6 +35,14 @@ const confluenceLocal = {
     ipcRenderer.on('sync:event', wrapped as never)
     return () => ipcRenderer.removeListener('sync:event', wrapped as never)
   },
+  /** 수동 업데이트 진행 스트림(다운로드 진행률·완료·실패). */
+  onUpdateEvent: (listener: (payload: unknown) => void): (() => void) => {
+    const wrapped = (_event: unknown, payload: unknown): void => {
+      listener(payload)
+    }
+    ipcRenderer.on('update:event', wrapped as never)
+    return () => ipcRenderer.removeListener('update:event', wrapped as never)
+  },
 }
 
 /** main이 마커로 보낸 구조화 오류를 Error로 재조립(kind/status 포함). */

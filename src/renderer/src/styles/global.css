@@ -1499,3 +1499,14 @@ a {
   color: var(--c-text-3);
   font-variant-numeric: tabular-nums;
 }
+
+/* 수동 업데이트 컨트롤(헤더) — 상태 전환 간 폭 점프 방지 */
+.app-header__update {
+  min-width: 96px;
+  justify-content: center;
+  font-variant-numeric: tabular-nums;
+}
+.app-header__update .spinner {
+  width: 12px;
+  height: 12px;
+}

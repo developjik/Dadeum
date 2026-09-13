@@ -51,6 +51,12 @@ export function App(): React.ReactElement {
   const notice = useAppStore((s) => s.notice)
   const loadChangeset = useAppStore((s) => s.loadChangeset)
   const loadConflicts = useAppStore((s) => s.loadConflicts)
+  const updateStatus = useAppStore((s) => s.updateStatus)
+  const updateNewVersion = useAppStore((s) => s.updateNewVersion)
+  const updatePhase = useAppStore((s) => s.updatePhase)
+  const updateProgress = useAppStore((s) => s.updateProgress)
+  const checkUpdate = useAppStore((s) => s.checkUpdate)
+  const installUpdate = useAppStore((s) => s.installUpdate)
   const [tab, setTab] = useState<TabKey>('document')
 
   useEffect(() => {
@@ -105,6 +111,41 @@ export function App(): React.ReactElement {
           {ko.app.title}
         </span>
         <div className="app-header__meta">
+          {updatePhase === 'restarting' ? (
+            <button type="button" className="btn btn--subtle app-header__update" disabled>
+              {ko.update.restarting}
+            </button>
+          ) : updatePhase === 'downloading' ? (
+            <button
+              type="button"
+              className="btn btn--subtle app-header__update"
+              disabled
+              aria-live="polite"
+            >
+              {ko.update.downloading(updateProgress ?? 0)}
+            </button>
+          ) : updateStatus === 'checking' ? (
+            <button type="button" className="btn btn--subtle app-header__update" disabled>
+              <span className="spinner" aria-hidden="true" />
+              {ko.update.checking}
+            </button>
+          ) : updateStatus === 'available' ? (
+            <button
+              type="button"
+              className="btn btn--primary app-header__update"
+              onClick={() => void installUpdate()}
+            >
+              {ko.update.install(updateNewVersion ?? '')}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className="btn btn--subtle app-header__update"
+              onClick={() => void checkUpdate()}
+            >
+              {ko.update.check}
+            </button>
+          )}
           <span className="app-header__site">
             <span className="status-dot" aria-hidden="true" />
             <span className="app-header__site-host">{siteHost(baseUrl)}</span>

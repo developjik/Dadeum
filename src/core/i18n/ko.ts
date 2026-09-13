@@ -107,6 +107,17 @@ export const ko = {
     remoteDeletedHint:
       '원격에서 삭제된 페이지입니다. 로컬 사본은 보존되며, 복원은 Confluence에서 페이지를 복구한 뒤 동기화하세요.',
   },
+  update: {
+    check: '업데이트 확인',
+    checking: '확인 중…',
+    upToDate: '최신 버전입니다',
+    unavailable: (reason?: string) =>
+      `업데이트를 확인할 수 없습니다${reason ? ` — ${reason}` : ''}`,
+    install: (version: string) => `v${version} 설치`,
+    downloading: (percent: number) => `다운로드 중 ${percent}%`,
+    restarting: '재시작 중…',
+    failed: (message: string) => `업데이트 실패${message ? ` — ${message}` : ''}`,
+  },
   auth: {
     siteUrl: '사이트 주소',
     email: '이메일',
