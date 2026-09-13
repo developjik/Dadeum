@@ -68,6 +68,15 @@ describe('storageToMarkdown', () => {
     expect(markdown).not.toContain('&#160;')
     expect(markdownToStorage(markdown)).toContain(cdata)
   })
+  it('확장 엔티티(zwj·there4·sube 등)도 문자로 복원되어 왕복 무손실이다', () => {
+    // 실제 스페이스 풀에서 entity-not-found로 관측된 엔티티(2026-09 E2E).
+    // zwj는 이모지·한글 조합 결합자 — 누락 시 조합이 깨진다.
+    const storage = '<p>a&nbsp;∴b ‍c ≤d ≥e ∼f</p>'
+    const markdown = expectRoundTripLossless(storage)
+    expect(markdown).toContain('∴')
+    expect(markdown).toContain('\u200d')
+    expect(markdown).toContain('≤')
+  })
 })
 
 describe('markdownToStorage', () => {

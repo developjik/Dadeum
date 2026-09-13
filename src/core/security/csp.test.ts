@@ -27,4 +27,12 @@ describe('buildCsp', () => {
     expect(directives.length).toBeGreaterThanOrEqual(8)
     for (const d of directives) expect(d.length).toBeGreaterThan(0)
   })
+
+  it('dev 모드에서만 인라인 script를 허용한다(Fast Refresh 프리앰블)', () => {
+    const dev = buildCsp({ dev: true })
+    expect(dev).toContain("script-src 'self' 'unsafe-inline'")
+    // 프로덕션 정책은 dev 완화에 영향받지 않는다
+    expect(csp).not.toContain("'unsafe-inline' script")
+    expect(csp).not.toContain("script-src 'self' 'unsafe-inline'")
+  })
 })

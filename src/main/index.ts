@@ -35,11 +35,12 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     // 응답 헤더에도 동일 CSP를 강제한다(index.html 메타 태그와 이중 방어).
+    // dev에서는 인라인 프리앰블 허용(자세한 근거는 buildCsp 참고).
     session.defaultSession.webRequest.onHeadersReceived((details, callback) => {
       callback({
         responseHeaders: {
           ...details.responseHeaders,
-          'Content-Security-Policy': [buildCsp()],
+          'Content-Security-Policy': [buildCsp({ dev: isDev })],
         },
       })
     })
@@ -47,6 +48,11 @@ if (!app.requestSingleInstanceLock()) {
     registerIpcHandlers()
     registerUpdaterHandlers()
     registerAuthAndSpaceHandlers()
+
+    // 기동 시 메인 창을 즉시 띄운다. activate 이벤트만으로는 부족하다 —
+    // CLI/dev 실행에서는 activate가 발생하지 않아(또는 whenReady보다 먼저 지나가
+    // 리스너 등록 전에 발생해) 무창 상태로 앱이 살아 있는 P0 회귀가 있었다.
+    createMainWindow()
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createMainWindow()
