@@ -77,7 +77,8 @@ jobs:
 
       - name: Smoke boot (macOS)
         if: runner.os == 'macOS'
-        run: APP_SMOKE=1 "./dist/mac/Confluence Local.app/Contents/MacOS/Confluence Local"
+        # arm64 러너는 dist/mac-arm64에, x64는 dist/mac에 산출된다 — glob으로 양쪽 커버
+        run: APP_SMOKE=1 ./dist/mac*/Confluence\ Local.app/Contents/MacOS/Confluence\ Local
 
       - name: Smoke boot (Windows)
         if: runner.os == 'Windows'

@@ -7,6 +7,7 @@ import {
   ClaudeCodeAdapter,
   resolveClaudeCommand,
 } from './claudeCodeAdapter'
+import type { SpawnFn } from './cliProcessRun'
 import { parseStreamJsonLine, parseStreamJsonLines } from './streamJson'
 
 interface FakeProcess extends AgentProcess {
@@ -45,6 +46,35 @@ function fakeProcess(): FakeProcess {
     },
   }
   return proc as FakeProcess
+}
+
+interface SpawnRecorder {
+  impl: SpawnFn
+  proc: FakeProcess
+  /** 스폰된 커맨드 기록 — win32의 kill-tree는 taskkill 스폰으로 구현된다 */
+  commands: string[]
+}
+
+/** 커맨드를 기록하는 스폰 주입 — kill-tree의 플랫폼 분기(win: taskkill / POSIX: signal) 검증용. */
+function recordingSpawn(proc: FakeProcess): SpawnRecorder {
+  const commands: string[] = []
+  return {
+    proc,
+    commands,
+    impl: (command, _args, _options) => {
+      commands.push(command)
+      return proc
+    },
+  }
+}
+
+/** graceful kill 검증 — win32는 taskkill 스폰, POSIX는 SIGTERM(그룹 kill 실패 시 child.kill). */
+function expectGracefulKill(spawn: SpawnRecorder): void {
+  if (process.platform === 'win32') {
+    expect(spawn.commands).toContain('taskkill')
+  } else {
+    expect(spawn.proc.killCalls).toContain('SIGTERM')
+  }
 }
 
 describe('buildClaudeArgs', () => {
@@ -163,29 +193,34 @@ describe('ClaudeCodeAdapter 계약', () => {
     expect(stdinWritten).toBe('stdin 프롬프트')
   })
 
-  it('취소 시 SIGTERM → 프로세스 닫힘 → cancelled 종단', async () => {
-    const proc = fakeProcess()
-    const adapter = new ClaudeCodeAdapter({ spawnImpl: () => proc })
+  it('취소 시 종료 신호 → 프로세스 닫힘 → cancelled 종단', async () => {
+    const spawn = recordingSpawn(fakeProcess())
+    const adapter = new ClaudeCodeAdapter({ spawnImpl: spawn.impl })
     const handle = adapter.start({ prompt: 'p', cwd: '/ws' })
     const promise = expect(handle.terminal).resolves.toBe('cancelled')
     handle.cancel()
-    proc.emitClose(null)
+    spawn.proc.emitClose(null)
     await promise
-    expect(proc.killCalls).toContain('SIGTERM')
+    expectGracefulKill(spawn)
   })
 
-  it('타임아웃 시 SIGTERM → 2초 후 SIGKILL, timeout 종단한다(부분 쓰기 정리 기회)', async () => {
+  it('타임아웃 시 정상 종료 신호 → 2초 후 강제 종료, timeout 종단한다(부분 쓰기 정리 기회)', async () => {
     vi.useFakeTimers()
-    const proc = fakeProcess()
-    const adapter = new ClaudeCodeAdapter({ spawnImpl: () => proc })
+    const spawn = recordingSpawn(fakeProcess())
+    const adapter = new ClaudeCodeAdapter({ spawnImpl: spawn.impl })
     const handle = adapter.start({ prompt: 'p', cwd: '/ws', timeoutMs: 50 })
     const promise = expect(handle.terminal).resolves.toBe('timeout')
     vi.advanceTimersByTime(60)
-    // 1단계 SIGTERM: CLI가 진행 중 편집을 안전하게 마무리할 기회
-    expect(proc.killCalls).toContain('SIGTERM')
+    // 1단계 정상 종료: CLI가 진행 중 편집을 안전하게 마무리할 기회
+    expectGracefulKill(spawn)
     vi.advanceTimersByTime(2000)
     await promise
-    expect(proc.killCalls).toEqual(['SIGTERM', 'SIGKILL'])
+    // 2단계 강제 종료까지 정확히 2회 — win32는 taskkill 스폰 2회, POSIX는 SIGTERM→SIGKILL
+    if (process.platform === 'win32') {
+      expect(spawn.commands.filter((command) => command === 'taskkill')).toHaveLength(2)
+    } else {
+      expect(spawn.proc.killCalls).toEqual(['SIGTERM', 'SIGKILL'])
+    }
     vi.useRealTimers()
   })
 
@@ -201,21 +236,29 @@ describe('ClaudeCodeAdapter 계약', () => {
 
 describe('동시 런·stdin 안전(P1)', () => {
   it('이후 런 시작 후 이전 런의 cancel이 다른 프로세스를 죽리지 않는다', async () => {
-    const procA = fakeProcess()
-    const procB = fakeProcess()
+    const spawnA = recordingSpawn(fakeProcess())
+    const spawnB = recordingSpawn(fakeProcess())
     const adapter = new ClaudeCodeAdapter({
-      spawnImpl: (_command, _args, options) => (options.cwd === '/ws/A' ? procA : procB),
+      spawnImpl: (command, args, options) =>
+        options.cwd === '/ws/A'
+          ? spawnA.impl(command, args, options)
+          : spawnB.impl(command, args, options),
     })
     const handleA = adapter.start({ prompt: 'a', cwd: '/ws/A' })
     const handleB = adapter.start({ prompt: 'b', cwd: '/ws/B' })
 
     handleA.cancel()
 
-    expect(procA.killCalls).toContain('SIGTERM')
-    expect(procB.killCalls).toHaveLength(0)
+    expectGracefulKill(spawnA)
+    // B는 최초 스폰 외에 어떤 종료 시도도 받지 않는다
+    if (process.platform === 'win32') {
+      expect(spawnB.commands).toHaveLength(1)
+    } else {
+      expect(spawnB.proc.killCalls).toHaveLength(0)
+    }
 
-    procA.emitClose(null)
-    procB.emitClose(0)
+    spawnA.proc.emitClose(null)
+    spawnB.proc.emitClose(0)
     await expect(handleA.terminal).resolves.toBe('cancelled')
     await expect(handleB.terminal).resolves.toBe('completed')
   })
