@@ -72,6 +72,13 @@ describe('buildClaudeArgs', () => {
     const allowed = args[args.indexOf('--allowedTools') + 1]
     expect(allowed).toBe('Read,Glob,Grep,Edit(//ws/DEV/**),Write(//ws/DEV/**)')
   })
+  it('읽기 전용 런은 쓰기 도구 없이 세션 resume도 하지 않는다', () => {
+    const args = buildClaudeArgs('sess-9', '/ws/DEV', true)
+    const allowed = args[args.indexOf('--allowedTools') + 1]
+    expect(allowed).toBe('Read,Glob,Grep')
+    expect(args).not.toContain('--resume')
+    expect(args).not.toContain('--permission-mode')
+  })
 })
 
 describe('resolveClaudeCommand / augmentedGuiPath', () => {

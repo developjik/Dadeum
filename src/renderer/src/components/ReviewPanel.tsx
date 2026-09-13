@@ -33,6 +33,9 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
   const diffs = useAppStore((s) => s.diffs)
   const changeset = useAppStore((s) => s.changeset)
   const pushOutcome = useAppStore((s) => s.pushOutcome)
+  const reviewRunning = useAppStore((s) => s.reviewRunning)
+  const reviewVerdict = useAppStore((s) => s.reviewVerdict)
+  const reviewNote = useAppStore((s) => s.reviewNote)
   const busy = useAppStore((s) => s.busy)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirming, setConfirming] = useState(false)
@@ -105,6 +108,50 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
         </button>
       </div>
       {!changeset ? <p className="review-pane__hint">{ko.app.loading}</p> : null}
+
+      {reviewRunning || reviewVerdict || reviewNote ? (
+        <section className="audit-card" aria-label={ko.review.auditTitle}>
+          <header className="audit-card__head">
+            {reviewRunning ? (
+              <span className="spinner spinner--xs" aria-hidden="true" />
+            ) : reviewVerdict ? (
+              <CheckCircleIcon size={14} />
+            ) : (
+              <AlertIcon size={14} />
+            )}
+            <span className="audit-card__title">{ko.review.auditTitle}</span>
+            {reviewRunning ? (
+              <span className="audit-card__state">{ko.review.auditRunning}</span>
+            ) : null}
+          </header>
+          {reviewVerdict ? (
+            <div className="audit-card__body">
+              {reviewVerdict.summary ? (
+                <p className="audit-card__summary">{reviewVerdict.summary}</p>
+              ) : null}
+              <ul className="audit-card__files">
+                {reviewVerdict.files.map((file) => (
+                  <li key={file.path} className={`audit-file audit-file--${file.status}`}>
+                    <span className="audit-file__status">
+                      {file.status === 'ok'
+                        ? ko.review.auditOk
+                        : file.status === 'warn'
+                          ? ko.review.auditWarn
+                          : ko.review.auditError}
+                    </span>
+                    <span className="audit-file__path">{file.path}</span>
+                    {file.note ? <span className="audit-file__note">{file.note}</span> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : reviewNote ? (
+            <p className="audit-card__note" role={reviewRunning ? 'status' : 'alert'}>
+              {reviewNote}
+            </p>
+          ) : null}
+        </section>
+      ) : null}
 
       {changeset && (total > 0 || missingCount > 0) ? (
         <>

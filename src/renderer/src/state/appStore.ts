@@ -6,6 +6,7 @@ import { renderPreviewHtml } from '../../../core/preview/render'
 import type { ChangeSet } from '../../../core/push/changeSet'
 import type { LineChange } from '../../../core/push/diff'
 import type { PushOutcome } from '../../../core/push/types'
+import { parseReviewVerdict, type ReviewVerdict } from '../../../core/review/verdict'
 import type { PageTreeNode } from '../../../core/store/tree'
 import type { UpdateCheckOutcome } from '../../../core/updater/types'
 
@@ -57,6 +58,10 @@ interface AppUiState {
   updateProgress?: number
   changeset: ChangeSet | null
   pushOutcome: PushOutcome | null
+  /** 변경 감사(읽기 전용 리뷰 런) 상태 — 검토 패널에 표시된다. */
+  reviewRunning: boolean
+  reviewVerdict: ReviewVerdict | null
+  reviewNote?: string
   conflicts: Array<{ pageId: string; path: string; reason: 'remote-deleted' | 'dirty' }>
   diffs: Record<string, LineChange[]>
 
@@ -64,15 +69,16 @@ interface AppUiState {
   dismissError: () => void
   connect: (siteUrl: string, email: string, apiToken: string) => Promise<void>
   disconnect: () => Promise<void>
-  loadSpaces: () => Promise<void>
   pullSpace: (spaceKey: string) => Promise<void>
   cancelPull: (spaceKey: string) => Promise<void>
+  loadSpaces: () => Promise<void>
+  installUpdate: () => Promise<void>
+  runReview: (spaceKey: string, instruction: string) => Promise<void>
   loadTree: (spaceKey: string) => Promise<void>
   openPage: (path: string) => Promise<void>
   openExternal: (url: string) => Promise<void>
   cancelAgent: () => Promise<void>
   checkUpdate: () => Promise<void>
-  installUpdate: () => Promise<void>
   selectSpace: (spaceKey: string) => Promise<void>
   sendChat: (prompt: string) => Promise<void>
   loadChangeset: (spaceKey: string) => Promise<void>
@@ -97,20 +103,57 @@ let noticeTimer: ReturnType<typeof setTimeout> | undefined
 /** openPage 응답 경쟁 가드 — 마지막 선택만 화면에 반영한다. */
 let openPageSeq = 0
 
+function appendSystemMessage(text: string): void {
+  const { chatMessages } = useAppStore.getState()
+  useAppStore.setState({ chatMessages: [...chatMessages, { role: 'system', text }] })
+}
+
+/** 감사 런의 텍스트 누적 버퍼 — 판정은 런 종료 시 한 번 파싱한다. */
+let reviewTextBuffer = ''
+
+/** 감사(읽기 전용 리뷰) 런 이벤트 — 채팅에 섞지 않고 검토 판정 상태로만 간다. */
+function handleReviewEvent(
+  event: AgentRunEvent | { type: 'terminal'; state: string },
+  isActiveSpace: boolean,
+): void {
+  if (!isActiveSpace) return
+  if ('type' in event && event.type === 'text') {
+    reviewTextBuffer += event.value
+    return
+  }
+  if ('type' in event && event.type === 'error') {
+    useAppStore.setState({ reviewNote: event.message })
+    return
+  }
+  if ('type' in event && event.type === 'terminal') {
+    const verdict = parseReviewVerdict(reviewTextBuffer)
+    reviewTextBuffer = ''
+    useAppStore.setState({
+      reviewRunning: false,
+      reviewVerdict: verdict,
+      reviewNote: verdict ? undefined : ko.review.auditUnparsable,
+    })
+  }
+}
+
+/** 편집 런 정상 종료 후 변경이 있으면 감사 런을 자동으로 띄운다(기계 리뷰 게이트). */
+function maybeAutoReview(spaceKey: string, terminalState: string): void {
+  if (terminalState !== 'completed') return
+  const state = useAppStore.getState()
+  const changeset = state.changeset
+  if (!changeset || (changeset.modified.length === 0 && changeset.added.length === 0)) return
+  const instruction = [...state.chatMessages].reverse().find((m) => m.role === 'user')?.text ?? ''
+  void state.runReview(spaceKey, instruction)
+}
+
 function showNotice(message: string): void {
-  if (noticeTimer) clearTimeout(noticeTimer)
+  clearTimeout(noticeTimer)
   useAppStore.setState({ notice: message })
   noticeTimer = setTimeout(() => {
     useAppStore.setState({ notice: undefined })
     noticeTimer = undefined
   }, 6000)
 }
-
-function appendSystemMessage(text: string): void {
-  const { chatMessages } = useAppStore.getState()
-  useAppStore.setState({ chatMessages: [...chatMessages, { role: 'system', text }] })
-}
-
 /** main → sync:event의 auth-error 변형 판별(토큰 만료 안내). */
 function isAuthErrorEvent(payload: unknown): boolean {
   return (
@@ -159,7 +202,13 @@ export function ensureAgentEventSubscription(): void {
   if (!agentUnsubscribe) {
     agentUnsubscribe = window.confluenceLocal.onAgentEvent((payload) => {
       const event = payload.event as AgentRunEvent | { type: 'terminal'; state: string }
+      const kind = payload.kind === 'review' ? 'review' : 'write'
       const isActiveSpace = payload.spaceKey === useAppStore.getState().activeSpaceKey
+
+      if (kind === 'review') {
+        handleReviewEvent(event, isActiveSpace)
+        return
+      }
 
       if ('type' in event && event.type === 'text' && isActiveSpace) {
         const { chatMessages } = useAppStore.getState()
@@ -191,7 +240,12 @@ export function ensureAgentEventSubscription(): void {
         if (isActiveSpace) {
           appendSystemMessage(`${ko.chat.terminalPrefix} ${event.state}`)
           // 편집이 끝났으면 해당 스페이스의 변경 세트를 자동으로 다시 검사한다
-          void useAppStore.getState().loadChangeset(payload.spaceKey)
+          void useAppStore
+            .getState()
+            .loadChangeset(payload.spaceKey)
+            .then(() => {
+              maybeAutoReview(payload.spaceKey, event.state)
+            })
         }
       } else if ('type' in event && event.type === 'error' && isActiveSpace) {
         appendSystemMessage(`${ko.chat.errorPrefix} ${event.message}`)
@@ -258,6 +312,8 @@ export const useAppStore = create<AppUiState>((set, get) => ({
   agentStartAborted: false,
   updateStatus: 'idle',
   updatePhase: 'idle',
+  reviewRunning: false,
+  reviewVerdict: null,
   changeset: null,
   pushOutcome: null,
   diffs: {},
@@ -382,6 +438,9 @@ export const useAppStore = create<AppUiState>((set, get) => ({
       selected: null,
       changeset: null,
       pushOutcome: null,
+      reviewVerdict: null,
+      reviewRunning: false,
+      reviewNote: undefined,
       diffs: {},
     })
     await get().loadTree(spaceKey)
@@ -532,6 +591,26 @@ export const useAppStore = create<AppUiState>((set, get) => ({
       set({
         updatePhase: 'idle',
         error: ko.update.failed(String(cause instanceof Error ? cause.message : cause)),
+      })
+    }
+  },
+
+  runReview: async (spaceKey, instruction) => {
+    reviewTextBuffer = ''
+    set({ reviewRunning: true, reviewVerdict: null, reviewNote: undefined })
+    try {
+      const result = await api<{ runId?: string; empty?: boolean }>('review:run', {
+        spaceKey,
+        instruction,
+      })
+      // 감사할 변경이 없거나 런이 시작 못 했으면 즉시 해제(terminal 이벤트가 오지 않는다)
+      if (!result.runId || result.empty) {
+        set({ reviewRunning: false, reviewNote: ko.review.auditEmpty })
+      }
+    } catch (cause) {
+      set({
+        reviewRunning: false,
+        reviewNote: String(cause instanceof Error ? cause.message : cause),
       })
     }
   },

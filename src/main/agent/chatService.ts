@@ -29,12 +29,19 @@ export class ChatRunService {
     prompt: string
     spaceRoot: string
     db: SyncStateDb
+    /** 런 종류 — 'write'(편집, 세션 연속) | 'review'(읽기 전용 감사, 세션 격리). */
+    kind?: 'write' | 'review'
+    /** 읽기 전용 런(감사) — 쓰기 도구 미부여. */
+    readOnly?: boolean
+    /** 런 타임아웃 ms(미지정 시 어댑터 기본값). */
+    timeoutMs?: number
   }): { runId: string } {
     const { sender, spaceKey, prompt, spaceRoot, db } = options
+    const kind = options.kind ?? 'write'
+    const isReview = kind === 'review'
     const adapterName = options.adapterName || 'claude-code'
     const adapter = this.adapters.get(adapterName)
     if (!adapter) throw new Error(`에이전트 어댑터가 없습니다: ${adapterName}`)
-
     const machine = this.machineFor(spaceKey)
     const started = machine.apply('startAgentRun')
     if (!started.ok) {
@@ -49,8 +56,16 @@ export class ChatRunService {
 
     let handle: AgentRunHandle
     try {
-      const sessionId = db.getAgentSessionId(spaceKey) ?? undefined
-      handle = adapter.start({ prompt, cwd: spaceRoot, sessionId })
+      // 감사 런은 세션을 resume하지 않는다(편집 대화와 격리) — 문서가 신뢰 불가 입력이라
+      // 감사 맥락에 편집 지시 이력이 섞이는 것도 막는다.
+      const sessionId = isReview ? undefined : (db.getAgentSessionId(spaceKey) ?? undefined)
+      handle = adapter.start({
+        prompt,
+        cwd: spaceRoot,
+        sessionId,
+        readOnly: options.readOnly,
+        timeoutMs: options.timeoutMs,
+      })
     } catch (cause) {
       // start 동기 실패 시 락을 즉시 반납해 스페이스가 agent-run에 갇히지 않게 한다
       machine.apply('endAgentRun')
@@ -59,11 +74,12 @@ export class ChatRunService {
     this.activeRuns.set(handle.runId, { handle, spaceKey })
 
     handle.onEvent((event) => {
-      if (event.type === 'started' && event.sessionId) {
+      // 세션 매핑은 편집 런만 갱신 — 감사 런의 session id가 편집 대화를 덮어쓰지 않게 한다
+      if (!isReview && event.type === 'started' && event.sessionId) {
         db.setAgentSessionId(spaceKey, event.sessionId)
       }
       if (!sender.isDestroyed()) {
-        sender.send('agent:event', { runId: handle.runId, spaceKey, event })
+        sender.send('agent:event', { runId: handle.runId, spaceKey, kind, event })
       }
     })
 
@@ -74,6 +90,7 @@ export class ChatRunService {
         sender.send('agent:event', {
           runId: handle.runId,
           spaceKey,
+          kind,
           event: { type: 'terminal', state },
         })
       }
@@ -81,7 +98,6 @@ export class ChatRunService {
 
     return { runId: handle.runId }
   }
-
   cancelRun(runId: string): void {
     this.activeRuns.get(runId)?.handle.cancel()
   }

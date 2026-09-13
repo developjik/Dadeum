@@ -24,6 +24,7 @@ export const IPC_CHANNELS = [
   'pull:cancel',
   'update:check',
   'update:install',
+  'review:run',
 ] as const
 
 export type IpcChannel = (typeof IPC_CHANNELS)[number]

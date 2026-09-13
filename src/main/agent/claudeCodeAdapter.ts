@@ -61,7 +61,24 @@ export function augmentedGuiPath(current: string | undefined): string {
   return parts.join(':')
 }
 
-export function buildClaudeArgs(sessionId: string | undefined, spaceRoot?: string): string[] {
+export function buildClaudeArgs(
+  sessionId: string | undefined,
+  spaceRoot?: string,
+  readOnly = false,
+): string[] {
+  if (readOnly) {
+    // 감사 런: 쓰기 도구 자체를 부여하지 않는다 — 문서 내용(신뢰 불가 입력)이
+    // 무슨 지시를 심어도 워크스페이스를 바꿀 수 없다. 세션 resume도 하지 않는다.
+    const args = [
+      '-p',
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--allowedTools',
+      'Read,Glob,Grep',
+    ]
+    return args
+  }
   // 파일 수정 도구는 스페이스 루트로 경로 스코프 — 프롬프트 인젝션에 의한
   // 워크스페이스 밖 쓰기를 차단한다(읽기 도구는 CLI 기본 정책을 따른다).
   const writeScope = spaceRoot ? scopedToolRule(spaceRoot) : ''
@@ -140,11 +157,15 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       const env = { ...process.env, PATH: augmentedGuiPath(process.env.PATH) }
       let child: AgentProcess
       try {
-        child = this.spawnImpl(command, buildClaudeArgs(request.sessionId, request.cwd), {
-          cwd: request.cwd,
-          env,
-          detached: process.platform === 'darwin',
-        })
+        child = this.spawnImpl(
+          command,
+          buildClaudeArgs(request.sessionId, request.cwd, request.readOnly === true),
+          {
+            cwd: request.cwd,
+            env,
+            detached: process.platform === 'darwin',
+          },
+        )
       } catch (cause) {
         // 스폰 자체의 동기 실패 — terminal을 반드시 종결시켜 스페이스 락이 풀리게 한다
         emit({

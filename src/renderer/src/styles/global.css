@@ -1615,3 +1615,101 @@ a {
   width: 12px;
   height: 12px;
 }
+
+/* ------------------------------ 에이전트 변경 감사 카드 ------------------------------ */
+.audit-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 13px 15px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-lg);
+  background: var(--c-bg-panel);
+  box-shadow: var(--shadow-sm);
+}
+
+.audit-card__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-text-2);
+}
+
+.audit-card__title {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.audit-card__state {
+  font-size: 11.5px;
+  color: var(--c-accent);
+}
+
+.audit-card__summary {
+  font-size: 12.5px;
+  color: var(--c-text);
+  line-height: 1.55;
+}
+
+.audit-card__note {
+  font-size: 12px;
+  color: var(--c-text-2);
+  line-height: 1.55;
+}
+
+.audit-card__files {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.audit-file {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 12px;
+  min-width: 0;
+}
+
+.audit-file__status {
+  flex: none;
+  font-size: 10.5px;
+  font-weight: 700;
+  padding: 1px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.audit-file--ok .audit-file__status {
+  background: var(--c-success-bg);
+  color: var(--c-success);
+}
+
+.audit-file--warn .audit-file__status {
+  background: var(--c-warning-bg);
+  color: var(--c-warning);
+}
+
+.audit-file--error .audit-file__status {
+  background: var(--c-danger-bg);
+  color: var(--c-danger);
+}
+
+.audit-file__path {
+  flex: none;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  color: var(--c-text-2);
+}
+
+.audit-file__note {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--c-text-2);
+}

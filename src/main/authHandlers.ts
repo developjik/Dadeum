@@ -9,6 +9,7 @@ import { fileHashOf } from '../core/store/hash'
 import { safeSpaceDirName } from '../core/store/workspace'
 import { ChatRunService } from './agent/chatService'
 import { ClaudeCodeAdapter } from './agent/claudeCodeAdapter'
+import { buildReviewPrompt } from './agent/reviewPrompt'
 import {
   clearCredentials,
   createClientFromStoredCredentials,
@@ -128,6 +129,33 @@ export function registerAuthAndSpaceHandlers(): void {
     if (!runId) throw new Error('runId가 필요합니다')
     chatRuns.cancelRun(runId)
     return { ok: true }
+  })
+  registerIpcHandler('review:run', (payload, sender) => {
+    if (typeof payload !== 'object' || payload === null || !('spaceKey' in payload)) {
+      throw new Error('spaceKey가 필요합니다')
+    }
+    const spaceKey = String((payload as { spaceKey: unknown }).spaceKey ?? '')
+    if (!spaceKey) throw new Error('spaceKey가 필요합니다')
+    const instruction =
+      'instruction' in payload && typeof payload.instruction === 'string' ? payload.instruction : ''
+
+    const changeset = computeChangeSet(resolveWorkspaceRoot(), getWorkspaceDb(), spaceKey)
+    const paths = [...changeset.modified.map((p) => p.path), ...changeset.added.map((p) => p.path)]
+    if (paths.length === 0) return { runId: undefined, empty: true }
+
+    const spaceRoot = join(resolveWorkspaceRoot(), 'spaces', safeSpaceDirName(spaceKey))
+    const { runId } = chatRuns.startRun({
+      sender,
+      adapterName: 'claude-code',
+      spaceKey,
+      prompt: buildReviewPrompt(instruction, paths),
+      spaceRoot,
+      db: getWorkspaceDb(),
+      kind: 'review',
+      readOnly: true,
+      timeoutMs: 3 * 60 * 1000,
+    })
+    return { runId, empty: false }
   })
   registerIpcHandler('push:changeset', (payload) => {
     const spaceKey = String((payload as { spaceKey?: string })?.spaceKey ?? '')

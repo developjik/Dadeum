@@ -185,3 +185,106 @@ describe('수동 업데이트 흐름', () => {
     expect(state.error).toContain('업데이트 실패')
   })
 })
+
+describe('변경 감사(리뷰 게이트) 라우팅', () => {
+  it('감사 런의 텍스트는 채팅에 섞이지 않고 판정으로 파싱된다', () => {
+    useAppStore.setState({ activeSpaceKey: 'A', reviewRunning: true })
+    agentEmit?.({
+      runId: 'rev-1',
+      spaceKey: 'A',
+      kind: 'review',
+      event: {
+        type: 'text',
+        value: '```json\n{"files":[{"path":"a/index.md","status":"warn","note":"제목 무관 변경"}]}',
+      },
+    })
+    agentEmit?.({
+      runId: 'rev-1',
+      spaceKey: 'A',
+      kind: 'review',
+      event: { type: 'text', value: '\n```\n' },
+    })
+    agentEmit?.({
+      runId: 'rev-1',
+      spaceKey: 'A',
+      kind: 'review',
+      event: { type: 'terminal', state: 'completed' },
+    })
+
+    const state = useAppStore.getState()
+    expect(state.chatMessages).toHaveLength(0)
+    expect(state.reviewRunning).toBe(false)
+    expect(state.reviewVerdict?.files[0]?.status).toBe('warn')
+    expect(state.reviewVerdict?.files[0]?.note).toContain('무관')
+  })
+
+  it('감사 판독 실패는 안내 문구로 떨어진다', () => {
+    useAppStore.setState({ activeSpaceKey: 'A', reviewRunning: true })
+    agentEmit?.({
+      runId: 'rev-2',
+      spaceKey: 'A',
+      kind: 'review',
+      event: { type: 'text', value: '모든 파일이 괜찮아 보입니다.' },
+    })
+    agentEmit?.({
+      runId: 'rev-2',
+      spaceKey: 'A',
+      kind: 'review',
+      event: { type: 'terminal', state: 'completed' },
+    })
+    expect(useAppStore.getState().reviewVerdict).toBeNull()
+    expect(useAppStore.getState().reviewNote).toContain('판독')
+  })
+
+  it('편집 런 정상 종료 후 변경이 있으면 감사를 자동 시작한다', async () => {
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'push:changeset')
+        return {
+          modified: [{ path: 'spaces/A/x/index.md' }],
+          added: [],
+          missing: [],
+          attachments: [],
+        }
+      if (channel === 'review:run') return { runId: 'rev-3', empty: false }
+      return {}
+    })
+    useAppStore.setState({
+      activeSpaceKey: 'A',
+      agentRunning: true,
+      chatMessages: [
+        { role: 'user', text: '가이드 문단 추가해줘' },
+        { role: 'assistant', text: '추가했습니다' },
+      ],
+    })
+
+    agentEmit?.({ runId: 'w-1', spaceKey: 'A', event: { type: 'terminal', state: 'completed' } })
+
+    // loadChangeset → maybeAutoReview → runReview 비동기 체인: 실제 신호(review:run 호출)를
+    // 마이크로태스크 플러시로 폴링한다 — 고정 대기가 아니라 조건 충족 시 즉시 반환
+    for (let i = 0; i < 50 && !invoke.mock.calls.some(([c]) => c === 'review:run'); i++) {
+      await Promise.resolve()
+    }
+
+    const reviewCall = invoke.mock.calls.find(([channel]) => channel === 'review:run')
+    const payload = reviewCall?.[1] as { spaceKey?: string; instruction?: string }
+    expect(payload.spaceKey).toBe('A')
+    expect(payload.instruction).toBe('가이드 문단 추가해줘')
+    expect(useAppStore.getState().reviewRunning).toBe(true)
+  })
+
+  it('변경이 없으면 감사를 시작하지 않는다', async () => {
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'push:changeset')
+        return { modified: [], added: [], missing: [], attachments: [] }
+      return {}
+    })
+    useAppStore.setState({ activeSpaceKey: 'A', agentRunning: true })
+
+    agentEmit?.({ runId: 'w-2', spaceKey: 'A', event: { type: 'terminal', state: 'completed' } })
+    for (let i = 0; i < 50; i++) {
+      await Promise.resolve()
+    }
+
+    expect(invoke.mock.calls.some(([channel]) => channel === 'review:run')).toBe(false)
+  })
+})

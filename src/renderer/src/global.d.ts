@@ -6,7 +6,12 @@ declare global {
     confluenceLocal?: {
       invoke: (channel: string, payload?: unknown) => Promise<unknown>
       onAgentEvent: (
-        listener: (payload: { runId: string; spaceKey: string; event: unknown }) => void,
+        listener: (payload: {
+          runId: string
+          spaceKey: string
+          kind?: 'write' | 'review'
+          event: unknown
+        }) => void,
       ) => () => void
       onSyncEvent: (listener: (payload: unknown) => void) => () => void
       onUpdateEvent: (listener: (payload: unknown) => void) => () => void

@@ -16,7 +16,6 @@ export type AgentRunEvent =
     }
   | { type: 'terminal'; state: 'completed' | 'cancelled' | 'timeout' | 'error' }
 export type AgentTerminalState = 'completed' | 'cancelled' | 'timeout' | 'error'
-
 export interface AgentRunRequest {
   /** 사용자 프롬프트(채팅 입력). */
   prompt: string
@@ -24,6 +23,8 @@ export interface AgentRunRequest {
   cwd: string
   /** 연속 대화를 위한 에이전트 세션 id(Claude Code session-id). */
   sessionId?: string
+  /** 읽기 전용 런(변경 감사 등) — 쓰기 도구를 아예 부여하지 않는다. */
+  readOnly?: boolean
   /** 런 타임아웃 ms(기본 10분, 어댑터 소유). */
   timeoutMs?: number
 }

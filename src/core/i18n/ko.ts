@@ -93,6 +93,13 @@ export const ko = {
     missingCount: (count: number) => `파일 없음 ${count}`,
     missingHint:
       '페이지 기록은 있지만 로컬 파일이 사라졌습니다. 업로드 대상에서 제외되며, 삭제가 의도라면 Confluence에서 페이지를 삭제하세요.',
+    auditTitle: '에이전트 변경 감사',
+    auditRunning: '변경 감사 진행 중…',
+    auditUnparsable: '감사 결과를 판독할 수 없습니다 — diff를 직접 확인하세요.',
+    auditEmpty: '감사할 변경이 없습니다.',
+    auditOk: '적합',
+    auditWarn: '주의',
+    auditError: '승인 보류 권고',
   },
   conflict: {
     list: '충돌 후보',
