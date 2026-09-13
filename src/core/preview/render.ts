@@ -1,11 +1,11 @@
-import remarkParse from 'remark-parse'
-import remarkGfm from 'remark-gfm'
-import remarkRehype from 'remark-rehype'
+import type { Element, ElementContent, Root } from 'hast'
+import { defaultSchema } from 'hast-util-sanitize'
 import rehypeSanitize from 'rehype-sanitize'
 import rehypeStringify from 'rehype-stringify'
-import { defaultSchema } from 'hast-util-sanitize'
+import remarkGfm from 'remark-gfm'
+import remarkParse from 'remark-parse'
+import remarkRehype from 'remark-rehype'
 import { unified } from 'unified'
-import type { Element, ElementContent, Root } from 'hast'
 
 /**
  * 미리보기 렌더 파이프라인(계획 §6-1, ef-12 — Markdown 근사 렌더링).
@@ -23,8 +23,8 @@ export async function renderPreviewHtml(markdown: string): Promise<string> {
       attributes: {
         ...defaultSchema.attributes,
         code: [...(defaultSchema.attributes?.code ?? []), ['className']],
-        div: [...(defaultSchema.attributes?.div ?? []), ['className']]
-      }
+        div: [...(defaultSchema.attributes?.div ?? []), ['className']],
+      },
     })
     .use(carrierPlaceholders)
     .use(rehypeStringify)
@@ -33,8 +33,8 @@ export async function renderPreviewHtml(markdown: string): Promise<string> {
   return String(file)
 }
 
-/** 미리보기 파이프라인이 캐리어를 플레이스홀더로 바꾸는지 판정용 헬퍼(테스트·UI 공용). */
-export function isCarrierPreElement(node: unknown): node is Element {
+/** 미리보기 파이프라인에서 캐리어 펜스(pre) 요소를 판별한다. */
+function isCarrierPreElement(node: unknown): node is Element {
   if (!node || typeof node !== 'object') return false
   const element = node as { type?: string; tagName?: string; children?: unknown[] }
   if (element.type !== 'element' || element.tagName !== 'pre') return false
@@ -54,7 +54,9 @@ function placeholderLabel(pre: Element): string {
       for (const grandchild of child.children) {
         if (grandchild.type === 'text') {
           const summary = grandchild.value.trim()
-          return summary.length > 0 ? `Confluence 요소 — ${summary.slice(0, 60)}` : 'Confluence 요소'
+          return summary.length > 0
+            ? `Confluence 요소 — ${summary.slice(0, 60)}`
+            : 'Confluence 요소'
         }
       }
     }
@@ -72,9 +74,9 @@ function toPlaceholder(pre: Element): Element {
         type: 'element',
         tagName: 'em',
         properties: {},
-        children: [{ type: 'text', value: placeholderLabel(pre) }]
-      }
-    ]
+        children: [{ type: 'text', value: placeholderLabel(pre) }],
+      },
+    ],
   }
 }
 
@@ -91,7 +93,11 @@ const carrierPlaceholders = () => {
         next.push(toPlaceholder(child))
         continue
       }
-      if (child && typeof child === 'object' && Array.isArray((child as { children?: unknown[] }).children)) {
+      if (
+        child &&
+        typeof child === 'object' &&
+        Array.isArray((child as { children?: unknown[] }).children)
+      ) {
         walkChildren(child as { children: unknown[] })
       }
       next.push(child)

@@ -39,7 +39,7 @@ describe('한국어 문안 단일 소스(AC-12 정적 검증)', () => {
         file,
         hitLines: lines
           .map((line, index) => ({ line: index + 1, text: line }))
-          .filter(({ text }: { text: string }) => HANGUL.test(text))
+          .filter(({ text }: { text: string }) => HANGUL.test(text)),
       }))
       .filter(({ hitLines }) => hitLines.length > 0)
 

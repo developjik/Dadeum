@@ -8,12 +8,6 @@ export interface ConfluenceSpace {
   name: string
 }
 
-export interface ConfluencePageSummary {
-  id: string
-  title: string
-  version?: { number?: number | string }
-}
-
 /** v2 API 페이지네이션 봉투(_links.next 기반 커서). */
 export interface Paginated<T> {
   results: T[]

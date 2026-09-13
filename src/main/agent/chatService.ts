@@ -1,7 +1,7 @@
 import type { WebContents } from 'electron'
 import type { AgentAdapter, AgentRunHandle } from '../../core/agent/types'
 import type { SyncStateDb } from '../../core/store/syncState'
-import { SpaceStateMachine } from '../../core/sync/spaceStateMachine'
+import type { SpaceStateMachine } from '../../core/sync/spaceStateMachine'
 import { machineFor as sharedMachineFor } from '../sync/machines'
 
 /**
@@ -41,8 +41,15 @@ export class ChatRunService {
       throw new Error('에이전트 편집이 이미 진행 중입니다. 종료 후 다시 시도하세요.')
     }
 
-    const sessionId = db.getAgentSessionId(spaceKey) ?? undefined
-    const handle = adapter.start({ prompt, cwd: spaceRoot, sessionId })
+    let handle: AgentRunHandle
+    try {
+      const sessionId = db.getAgentSessionId(spaceKey) ?? undefined
+      handle = adapter.start({ prompt, cwd: spaceRoot, sessionId })
+    } catch (cause) {
+      // start 동기 실패 시 락을 즉시 반납해 스페이스가 agent-run에 갇히지 않게 한다
+      machine.apply('endAgentRun')
+      throw cause
+    }
     this.activeRuns.set(handle.runId, { handle, spaceKey })
 
     handle.onEvent((event) => {
@@ -61,7 +68,7 @@ export class ChatRunService {
         sender.send('agent:event', {
           runId: handle.runId,
           spaceKey,
-          event: { type: 'terminal', state }
+          event: { type: 'terminal', state },
         })
       }
     })

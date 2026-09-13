@@ -1,0 +1,16 @@
+# gitleaks 설정 — 기본 규칙 세트를 확장해 로컬 전용 디렉터리만 제외한다.
+# golden-pass-workspace/는 사용자의 실제 Confluence 문서 동기화본(개인 데이터),
+# artifacts/는 QA 산출물로 모두 git 미추적이지만 로컬 스캔 잡음을 줄이기 위해 제외.
+[extend]
+useDefault = true
+
+[allowlist]
+description = "로컬 전용·빌드 산출물 디렉터리"
+paths = [
+  '''golden-pass-workspace/''',
+  '''artifacts/''',
+  '''dist/''',
+  '''out/''',
+  '''coverage/''',
+  '''node_modules/''',
+]

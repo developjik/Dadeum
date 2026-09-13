@@ -2,6 +2,11 @@ appId: local.confluence.editor
 productName: Confluence Local
 directories:
   output: dist
+# better-sqlite3 v13은 NAPI 프리빌드를 패키지에 함께 배포하므로(모든 OS/아키텍처 포함)
+# 네이티브 재빌드가 불필요 — 경로 공백 등으로 node-gyp 오류가 나지 않도록 끔
+npmRebuild: false
+# 패키징 후 Electron 보안 퓨즈 활성화(RunAsNode off, asar 무결성 등 — scripts/afterPack.cjs)
+afterPack: ./scripts/afterPack.cjs
 files:
   - out/**
   - package.json

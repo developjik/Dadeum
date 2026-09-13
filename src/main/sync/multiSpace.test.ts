@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -7,7 +7,10 @@ import { SyncStateDb } from '../../core/store/syncState'
 import { pullFullSpace } from './pullService'
 
 function jsonResponse(body: unknown): Response {
-  return new Response(JSON.stringify(body), { status: 200, headers: { 'Content-Type': 'application/json' } })
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })
 }
 
 function clientFor(): ConfluenceClient {
@@ -18,13 +21,33 @@ function clientFor(): ConfluenceClient {
     sleep: () => Promise.resolve(),
     fetchImpl: (async (input: Request | string | URL) => {
       const url = String(input)
-      if (url.includes('/spaces/sp-dev/pages')) return jsonResponse({ results: [{ id: '900001', title: '개발 노트', version: { number: 1 }, parentId: null }], _links: {} })
-      if (url.includes('/spaces/sp-mkt/pages')) return jsonResponse({ results: [{ id: '900002', title: '마케팅 계획', version: { number: 5 }, parentId: null }], _links: {} })
-      if (url.includes('/api/v2/pages/900001')) return jsonResponse({ id: '900001', title: '개발 노트', version: { number: 1 }, body: { storage: { value: '<p>DEV 본문</p>' } } })
-      if (url.includes('/api/v2/pages/900002')) return jsonResponse({ id: '900002', title: '마케팅 계획', version: { number: 5 }, body: { storage: { value: '<p>MKT 본문</p>' } } })
+      if (url.includes('/spaces/sp-dev/pages'))
+        return jsonResponse({
+          results: [{ id: '900001', title: '개발 노트', version: { number: 1 }, parentId: null }],
+          _links: {},
+        })
+      if (url.includes('/spaces/sp-mkt/pages'))
+        return jsonResponse({
+          results: [{ id: '900002', title: '마케팅 계획', version: { number: 5 }, parentId: null }],
+          _links: {},
+        })
+      if (url.includes('/api/v2/pages/900001'))
+        return jsonResponse({
+          id: '900001',
+          title: '개발 노트',
+          version: { number: 1 },
+          body: { storage: { value: '<p>DEV 본문</p>' } },
+        })
+      if (url.includes('/api/v2/pages/900002'))
+        return jsonResponse({
+          id: '900002',
+          title: '마케팅 계획',
+          version: { number: 5 },
+          body: { storage: { value: '<p>MKT 본문</p>' } },
+        })
       if (url.includes('/child/attachment')) return jsonResponse({ results: [] })
       return jsonResponse({ results: [] })
-    }) as unknown as typeof fetch
+    }) as unknown as typeof fetch,
   })
 }
 
@@ -35,8 +58,18 @@ describe('다중 스페이스 동시 연결(AC-10, ef-14)', () => {
     const db = new SyncStateDb(join(root, '.sync', 'sync-state.db'))
     const client = clientFor()
 
-    const dev = await pullFullSpace({ client, space: { id: 'sp-dev', key: 'DEV', name: '개발' }, workspaceRoot: root, db })
-    const mkt = await pullFullSpace({ client, space: { id: 'sp-mkt', key: 'MKT', name: '마케팅' }, workspaceRoot: root, db })
+    const dev = await pullFullSpace({
+      client,
+      space: { id: 'sp-dev', key: 'DEV', name: '개발' },
+      workspaceRoot: root,
+      db,
+    })
+    const mkt = await pullFullSpace({
+      client,
+      space: { id: 'sp-mkt', key: 'MKT', name: '마케팅' },
+      workspaceRoot: root,
+      db,
+    })
 
     expect(dev.pages).toBe(1)
     expect(mkt.pages).toBe(1)
@@ -51,7 +84,9 @@ describe('다중 스페이스 동시 연결(AC-10, ef-14)', () => {
 
     // 본문 분리
     expect(readFileSync(join(root, 'spaces/DEV/개발-노트/index.md'), 'utf8')).toContain('DEV 본문')
-    expect(readFileSync(join(root, 'spaces/MKT/마케팅-계획/index.md'), 'utf8')).toContain('MKT 본문')
+    expect(readFileSync(join(root, 'spaces/MKT/마케팅-계획/index.md'), 'utf8')).toContain(
+      'MKT 본문',
+    )
     db.close()
   })
 })

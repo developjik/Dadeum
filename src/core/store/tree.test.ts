@@ -7,7 +7,7 @@ const row = (pageId: string, title: string, parentId: string | null, path = '') 
   path: path || `spaces/DEV/${pageId}/index.md`,
   version: 1,
   parentId,
-  remoteDeleted: false
+  remoteDeleted: false,
 })
 
 describe('buildPageTree', () => {
@@ -15,7 +15,7 @@ describe('buildPageTree', () => {
     const tree = buildPageTree([
       row('p1', '루트', null),
       row('p2', '자식', 'p1'),
-      row('p3', '손주', 'p2')
+      row('p3', '손주', 'p2'),
     ])
     expect(tree).toHaveLength(1)
     expect(tree[0]?.pageId).toBe('p1')
@@ -42,7 +42,7 @@ describe('buildPageTree', () => {
 
   it('트리 노드가 원격 삭제 표시를 보존한다', () => {
     const tree = buildPageTree([
-      { ...row('p1', '삭제됨', null), remoteDeleted: true }
+      { ...row('p1', '삭제됨', null), remoteDeleted: true },
     ]) as PageTreeNode[]
     expect(tree[0]?.remoteDeleted).toBe(true)
   })

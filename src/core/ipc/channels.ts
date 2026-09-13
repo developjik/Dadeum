@@ -20,7 +20,7 @@ export const IPC_CHANNELS = [
   'pages:diff',
   'conflict:list',
   'conflict:resolve',
-  'spaces:poll'
+  'spaces:poll',
 ] as const
 
 export type IpcChannel = (typeof IPC_CHANNELS)[number]

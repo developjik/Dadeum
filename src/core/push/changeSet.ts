@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { readdirSync, readFileSync, existsSync } from 'node:fs'
-import type { SyncStateDb, PageRecord } from '../store/syncState'
+import type { PageRecord, SyncStateDb } from '../store/syncState'
 import { dirSafeSpaceKey, isSyncTarget, parsePageFile } from '../store/workspace'
 
 /**
@@ -17,12 +17,12 @@ export interface ModifiedPage {
   newHash: string
 }
 
-export interface AddedPage {
+interface AddedPage {
   path: string
   title: string
 }
 
-export interface ChangedAttachment {
+interface ChangedAttachment {
   path: string
   pageId: string
   fileName: string
@@ -36,11 +36,15 @@ export interface ChangeSet {
   attachments: ChangedAttachment[]
 }
 
-export function sha256(content: string | Buffer): string {
+function sha256(content: string | Buffer): string {
   return createHash('sha256').update(content).digest('hex')
 }
 
-export function computeChangeSet(workspaceRoot: string, db: SyncStateDb, spaceKey: string): ChangeSet {
+export function computeChangeSet(
+  workspaceRoot: string,
+  db: SyncStateDb,
+  spaceKey: string,
+): ChangeSet {
   const spaceRoot = join(workspaceRoot, 'spaces', dirSafeSpaceKey(spaceKey))
   const indexFiles = walkIndexFiles(spaceRoot, workspaceRoot)
 
@@ -83,7 +87,12 @@ export function computeChangeSet(workspaceRoot: string, db: SyncStateDb, spaceKe
         const attHash = sha256(content)
         const rec = known.find((r) => r.fileName === entry.name)
         if (!rec || rec.fileHash !== attHash) {
-          attachments.push({ path: attRel, pageId: pageId ?? '', fileName: entry.name, newHash: attHash })
+          attachments.push({
+            path: attRel,
+            pageId: pageId ?? '',
+            fileName: entry.name,
+            newHash: attHash,
+          })
         }
       }
     }

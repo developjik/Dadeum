@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { ko } from '../../../core/i18n/ko'
 import { useAppStore } from '../state/appStore'
+import { ChatIcon, SendIcon, StopIcon } from './icons'
 
 export function ChatPanel(): React.ReactElement {
   const messages = useAppStore((s) => s.chatMessages)
@@ -10,20 +11,44 @@ export function ChatPanel(): React.ReactElement {
   const listRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
+    if (messages.length === 0 && !agentRunning) return
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
-  }, [messages.length])
+  }, [messages, agentRunning])
+
+  const lastRole = messages.length > 0 ? messages[messages.length - 1]?.role : undefined
 
   return (
-    <section aria-label="agent-chat">
+    <>
+      <header className="chat-rail__header">
+        <ChatIcon />
+        {ko.chat.title}
+        {agentRunning ? (
+          <span className="chat-rail__status">
+            <span className="spinner spinner--xs" aria-hidden="true" />
+            {ko.sync.agentRunning}
+          </span>
+        ) : null}
+      </header>
       <div ref={listRef} className="chat-messages">
         {messages.map((message, index) => (
-          <p key={index} className={`chat-${message.role}`}>
+          // biome-ignore lint/suspicious/noArrayIndexKey: append-only 채팅 로그라 순서 변경·삭제가 없다
+          <p key={index} className={`chat-message chat-message--${message.role}`}>
             {message.text}
           </p>
         ))}
-        {messages.length === 0 ? <p className="chat-system">{ko.chat.placeholder}</p> : null}
+        {agentRunning && lastRole !== 'assistant' ? (
+          <span className="chat-typing" aria-hidden="true">
+            <i />
+            <i />
+            <i />
+          </span>
+        ) : null}
+        {messages.length === 0 && !agentRunning ? (
+          <p className="chat-empty">{ko.chat.empty}</p>
+        ) : null}
       </div>
       <form
+        className="chat-inputbar"
         onSubmit={(event) => {
           event.preventDefault()
           const prompt = input.trim()
@@ -32,15 +57,44 @@ export function ChatPanel(): React.ReactElement {
           void sendChat(prompt)
         }}
       >
-        <input value={input} onChange={(e) => setInput(e.target.value)} placeholder={ko.chat.placeholder} />
+        <textarea
+          className="text-input chat-inputbar__textarea"
+          rows={2}
+          value={input}
+          aria-label={ko.chat.placeholder}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => {
+            // Enter는 전송, Shift+Enter는 줄바꿈(여러 줄 지시 지원)
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              const prompt = input.trim()
+              if (prompt.length === 0 || agentRunning) return
+              setInput('')
+              void sendChat(prompt)
+            }
+          }}
+          placeholder={ko.chat.placeholder}
+        />
         {agentRunning ? (
-          <button type="button" onClick={() => void useAppStore.getState().cancelAgent()}>
+          <button
+            type="button"
+            className="btn btn--default chat-stop"
+            onClick={() => void useAppStore.getState().cancelAgent()}
+          >
+            <StopIcon />
             {ko.chat.cancel}
           </button>
         ) : (
-          <button type="submit">{ko.chat.send}</button>
+          <button
+            type="submit"
+            className="btn btn--primary chat-send"
+            disabled={input.trim().length === 0}
+          >
+            <SendIcon />
+            {ko.chat.send}
+          </button>
         )}
       </form>
-    </section>
+    </>
   )
 }

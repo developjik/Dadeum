@@ -9,7 +9,8 @@ describe('renderPreviewHtml(AC-8)', () => {
   })
 
   it('캐리어 펜스를 플레이스홀더 박스로 바꾼다', async () => {
-    const md = '앞\n\n```confluence-storage name=structured-macro id=abc12345\n<ac:structured-macro ac:name="jira" />\n```\n\n뒤'
+    const md =
+      '앞\n\n```confluence-storage name=structured-macro id=abc12345\n<ac:structured-macro ac:name="jira" />\n```\n\n뒤'
     const html = await renderPreviewHtml(md)
     expect(html).toContain('confluence-placeholder')
     expect(html).toContain('Confluence 요소')

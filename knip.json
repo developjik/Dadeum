@@ -1,0 +1,5 @@
+{
+  "$schema": "./node_modules/knip/schema.json",
+  "entry": ["src/renderer/index.html", "scripts/golden-pass.ts", "scripts/afterPack.cjs"],
+  "project": ["src/**/*.{ts,tsx}", "scripts/**/*.{ts,cjs}"]
+}

@@ -1,12 +1,12 @@
 import { spawn as nodeSpawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import {
-  DEFAULT_AGENT_TIMEOUT_MS,
   type AgentAdapter,
   type AgentRunEvent,
   type AgentRunHandle,
   type AgentRunRequest,
-  type AgentTerminalState
+  type AgentTerminalState,
+  DEFAULT_AGENT_TIMEOUT_MS,
 } from '../../core/agent/types'
 import { parseStreamJsonLine } from './streamJson'
 
@@ -14,24 +14,31 @@ import { parseStreamJsonLine } from './streamJson'
 export interface AgentProcess {
   pid?: number
   stdin: { write(chunk: string): void; end(): void }
-  stdout: { setEncoding(enc: string): void; on(event: 'data', listener: (chunk: string) => void): void }
-  stderr: { setEncoding(enc: string): void; on(event: 'data', listener: (chunk: string) => void): void }
+  stdout: {
+    setEncoding(enc: string): void
+    on(event: 'data', listener: (chunk: string) => void): void
+  }
+  stderr: {
+    setEncoding(enc: string): void
+    on(event: 'data', listener: (chunk: string) => void): void
+  }
   on(event: 'close', listener: (code: number | null) => void): void
+  on(event: 'error', listener: (cause: Error) => void): void
   kill(signal?: NodeJS.Signals | number): unknown
 }
 
 export type SpawnFn = (
   command: string,
   args: string[],
-  options: { cwd: string; env: NodeJS.ProcessEnv; detached: boolean }
+  options: { cwd: string; env: NodeJS.ProcessEnv; detached: boolean },
 ) => AgentProcess
 
 /** macOS GUI 런치 환경 PATH 보완용 후보 경로(F-10). */
-export const GUI_PATH_CANDIDATES = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin']
+const GUI_PATH_CANDIDATES = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin']
 
 export function resolveClaudeCommand(
   candidates: string[] = ['/opt/homebrew/bin/claude', '/usr/local/bin/claude'],
-  exists: (p: string) => boolean = (p) => existsSync(p)
+  exists: (p: string) => boolean = (p) => existsSync(p),
 ): string {
   for (const candidate of candidates) {
     if (exists(candidate)) return candidate
@@ -48,7 +55,16 @@ export function augmentedGuiPath(current: string | undefined): string {
 }
 
 export function buildClaudeArgs(sessionId: string | undefined): string[] {
-  const args = ['-p', '--output-format', 'stream-json', '--verbose', '--permission-mode', 'acceptEdits', '--allowedTools', 'Read,Edit,Write,Glob,Grep']
+  const args = [
+    '-p',
+    '--output-format',
+    'stream-json',
+    '--verbose',
+    '--permission-mode',
+    'acceptEdits',
+    '--allowedTools',
+    'Read,Edit,Write,Glob,Grep',
+  ]
   if (sessionId) args.push('--resume', sessionId)
   return args // 프롬프트는 stdin으로 전달
 }
@@ -85,11 +101,22 @@ export class ClaudeCodeAdapter implements AgentAdapter {
 
       const command = resolveClaudeCommand()
       const env = { ...process.env, PATH: augmentedGuiPath(process.env.PATH) }
-      const child = this.spawnImpl(command, buildClaudeArgs(request.sessionId), {
-        cwd: request.cwd,
-        env,
-        detached: process.platform === 'darwin'
-      })
+      let child: AgentProcess
+      try {
+        child = this.spawnImpl(command, buildClaudeArgs(request.sessionId), {
+          cwd: request.cwd,
+          env,
+          detached: process.platform === 'darwin',
+        })
+      } catch (cause) {
+        // 스폰 자체의 동기 실패 — terminal을 반드시 종결시켜 스페이스 락이 풀리게 한다
+        emit({
+          type: 'error',
+          message: `에이전트 실행 실패: ${cause instanceof Error ? cause.message : String(cause)}`,
+        })
+        settle('error')
+        return
+      }
       this.activeChild = child
       emit({ type: 'started', pid: child.pid })
       // 프롬프트는 stdin으로 전달(claude -p는 stdin/positional 양쪽 지원, 파이프 환경에서 stdin이 안전)
@@ -101,9 +128,21 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         child.kill('SIGKILL')
       }, request.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS)
 
+      // 바이너리 부재·cwd 부재 등은 'error' 이벤트로만 arrive하고 close가 오지 않는다.
+      // 처리하지 않으면 terminal이 영원히 미해결되어 스페이스가 agent-run 잠금 상태로 남는다.
+      child.on('error', (cause: Error) => {
+        emit({ type: 'error', message: `에이전트 실행 실패: ${cause.message}` })
+        settle('error')
+      })
+
+      // stream-json은 줄 단위 프로토콜 — 청크 경계에서 잘린 라인은 버퍼링해야 파싱된다.
+      let lineBuffer = ''
       child.stdout.setEncoding('utf8')
       child.stdout.on('data', (chunk: string) => {
-        for (const line of chunk.split('\n')) {
+        lineBuffer += chunk
+        const lines = lineBuffer.split('\n')
+        lineBuffer = lines.pop() ?? ''
+        for (const line of lines) {
           for (const event of parseStreamJsonLine(line)) emit(event)
         }
       })
@@ -113,6 +152,11 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         if (trimmed.length > 0) emit({ type: 'error', message: trimmed })
       })
       child.on('close', (code: number | null) => {
+        // 잔여 버퍼 플러시(마지막 줄이 개행 없이 끝나는 경우)
+        if (lineBuffer.trim().length > 0) {
+          for (const event of parseStreamJsonLine(lineBuffer)) emit(event)
+          lineBuffer = ''
+        }
         if (cancelled) settle('cancelled')
         else if (timedOut) settle('timeout')
         else if (code === 0) settle('completed')
@@ -136,7 +180,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
           this.spawnImpl('taskkill', ['/T', '/F', '/PID', String(child.pid ?? 0)], {
             cwd: request.cwd,
             env: process.env,
-            detached: false
+            detached: false,
           })
           return
         }
@@ -155,7 +199,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
             }
           }, 2000)
         }
-      }
+      },
     }
   }
 }

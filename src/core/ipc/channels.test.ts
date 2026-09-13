@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { IPC_CHANNELS, assertWhitelistedChannel, isWhitelistedChannel } from './channels'
+import { assertWhitelistedChannel, IPC_CHANNELS, isWhitelistedChannel } from './channels'
 
 describe('IPC channel whitelist', () => {
   it('화이트리스트에 등록된 채널만 허용한다', () => {

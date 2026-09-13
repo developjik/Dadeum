@@ -1,11 +1,11 @@
-import { mkdirSync, mkdtempSync, writeFileSync, existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { SyncStateDb } from '../store/syncState'
-import { reconcilePageIds } from './reconciler'
-import { computeNextDelay, PollScheduler } from './pollScheduler'
 import { fileHashOf } from '../store/hash'
+import { SyncStateDb } from '../store/syncState'
+import { computeNextDelay, PollScheduler } from './pollScheduler'
+import { reconcilePageIds } from './reconciler'
 
 function setup(): { root: string; db: SyncStateDb; trashDir: string } {
   const root = mkdtempSync(join(tmpdir(), 'reconcile-'))
@@ -14,7 +14,13 @@ function setup(): { root: string; db: SyncStateDb; trashDir: string } {
   return { root, db, trashDir: join(root, '.sync', 'trash') }
 }
 
-function seedPage(root: string, db: SyncStateDb, pageId: string, dirName: string, body: string): string {
+function seedPage(
+  root: string,
+  db: SyncStateDb,
+  pageId: string,
+  dirName: string,
+  body: string,
+): string {
   const dir = join(root, 'spaces/DEV', dirName)
   mkdirSync(dir, { recursive: true })
   const relPath = `spaces/DEV/${dirName}/index.md`
@@ -27,7 +33,7 @@ function seedPage(root: string, db: SyncStateDb, pageId: string, dirName: string
     title: dirName,
     version: 1,
     parentId: null,
-    contentHash: fileHashOf(readFileSync(join(dir, 'index.md')))
+    contentHash: fileHashOf(readFileSync(join(dir, 'index.md'))),
   })
   void createHash
   return relPath
@@ -44,7 +50,7 @@ describe('reconcilePageIds(id 대차)', () => {
       db,
       workspaceRoot: root,
       trashDir,
-      now: new Date(0)
+      now: new Date(0),
     })
 
     expect(result.tombstoned).toEqual(['1001'])
@@ -64,7 +70,7 @@ describe('reconcilePageIds(id 대차)', () => {
       db,
       workspaceRoot: root,
       trashDir,
-      now: new Date(0)
+      now: new Date(0),
     })
 
     expect(result.tombstoned).toEqual([])
@@ -81,7 +87,7 @@ describe('reconcilePageIds(id 대차)', () => {
       db,
       workspaceRoot: root,
       trashDir,
-      now: new Date(0)
+      now: new Date(0),
     })
     expect(result.tombstoned).toEqual([])
     expect(existsSync(join(root, 'spaces/DEV/유지/index.md'))).toBe(true)
@@ -103,9 +109,12 @@ describe('computeNextDelay / PollScheduler', () => {
       baseIntervalMs: 100,
       jitterRatio: 0,
       onPoll,
-      timer: { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (h) => clearTimeout(h as NodeJS.Timeout) },
+      timer: {
+        setTimeout: (fn, ms) => setTimeout(fn, ms),
+        clearTimeout: (h) => clearTimeout(h as NodeJS.Timeout),
+      },
       random: () => 0.5,
-      shouldSkip: () => true
+      shouldSkip: () => true,
     })
     scheduler.start()
     await vi.advanceTimersByTimeAsync(150)
@@ -121,8 +130,11 @@ describe('computeNextDelay / PollScheduler', () => {
       baseIntervalMs: 100,
       jitterRatio: 0,
       onPoll,
-      timer: { setTimeout: (fn, ms) => setTimeout(fn, ms), clearTimeout: (h) => clearTimeout(h as NodeJS.Timeout) },
-      random: () => 0.5
+      timer: {
+        setTimeout: (fn, ms) => setTimeout(fn, ms),
+        clearTimeout: (h) => clearTimeout(h as NodeJS.Timeout),
+      },
+      random: () => 0.5,
     })
     scheduler.start()
     await vi.advanceTimersByTimeAsync(350)

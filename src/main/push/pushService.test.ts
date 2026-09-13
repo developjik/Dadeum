@@ -11,7 +11,7 @@ const PAGE = {
   id: '1001',
   title: '가이드',
   version: { number: 2 },
-  body: { storage: { value: '<p>서버 원본</p>' } }
+  body: { storage: { value: '<p>서버 원본</p>' } },
 }
 
 function makeClient(overrides?: {
@@ -29,21 +29,30 @@ function makeClient(overrides?: {
       const url = String(input)
       const method = init?.method ?? 'GET'
       if (url.includes('/api/v2/pages/1001') && method === 'GET') {
-        return new Response(JSON.stringify(updateVersion !== undefined ? { ...PAGE, version: { number: updateVersion } } : PAGE), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' }
-        })
+        return new Response(
+          JSON.stringify(
+            updateVersion !== undefined ? { ...PAGE, version: { number: updateVersion } } : PAGE,
+          ),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        )
       }
       if (url.includes('/api/v2/pages/1001') && method === 'PUT') {
         if (failUpdate) return new Response('server boom', { status: 500 })
         const requested = JSON.parse(String(init?.body)) as { version: { number: number } }
         return new Response(
-          JSON.stringify({ id: '1001', title: '가이드', version: { number: requested.version.number } }),
-          { status: 200, headers: { 'Content-Type': 'application/json' } }
+          JSON.stringify({
+            id: '1001',
+            title: '가이드',
+            version: { number: requested.version.number },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
         )
       }
       return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
-    }) as unknown as typeof fetch
+    }) as unknown as typeof fetch,
   })
 }
 
@@ -54,7 +63,7 @@ function setup(): { root: string; db: SyncStateDb; machine: SpaceStateMachine; r
   const relPath = 'spaces/DEV/가이드/index.md'
   writeFileSync(
     join(root, relPath),
-    '---\npageId: "1001"\nspaceKey: "DEV"\ntitle: "가이드"\nversion: 2\nparentId: null\nurl: "https://acme.atlassian.net/wiki/spaces/DEV/pages/1001"\nupdatedAt: null\nsyncedAt: null\n---\n\n새 본문'
+    '---\npageId: "1001"\nspaceKey: "DEV"\ntitle: "가이드"\nversion: 2\nparentId: null\nurl: "https://acme.atlassian.net/wiki/spaces/DEV/pages/1001"\nupdatedAt: null\nsyncedAt: null\n---\n\n새 본문',
   )
   const db = new SyncStateDb(join(root, '.sync', 'sync-state.db'))
   db.upsertPage({
@@ -64,7 +73,7 @@ function setup(): { root: string; db: SyncStateDb; machine: SpaceStateMachine; r
     title: '가이드',
     version: 2,
     parentId: null,
-    contentHash: 'old'
+    contentHash: 'old',
   })
   const machine = new SpaceStateMachine()
   return { root, db, machine, relPath }
@@ -75,7 +84,7 @@ describe('pushApprovedPages', () => {
     const { root, db, machine, relPath } = setup()
     const snapshot = {
       capturedAt: new Date().toISOString(),
-      entries: new Map([[relPath, { hash: await hashOf(join(root, relPath)) }]])
+      entries: new Map([[relPath, { hash: await hashOf(join(root, relPath)) }]]),
     }
 
     const outcome = await pushApprovedPages({
@@ -85,7 +94,7 @@ describe('pushApprovedPages', () => {
       machine,
       snapshot,
       approvedPaths: [relPath],
-      spaceId: 'sp-1'
+      spaceId: 'sp-1',
     })
 
     expect(outcome.failed).toHaveLength(0)
@@ -100,7 +109,7 @@ describe('pushApprovedPages', () => {
     const { root, db, machine, relPath } = setup()
     const snapshot = {
       capturedAt: new Date().toISOString(),
-      entries: new Map([[relPath, { hash: 'stale' }]])
+      entries: new Map([[relPath, { hash: 'stale' }]]),
     }
 
     const outcome = await pushApprovedPages({
@@ -110,7 +119,7 @@ describe('pushApprovedPages', () => {
       machine,
       snapshot,
       approvedPaths: [relPath],
-      spaceId: 'sp-1'
+      spaceId: 'sp-1',
     })
 
     expect(outcome.uploaded).toHaveLength(0)
@@ -127,7 +136,7 @@ describe('pushApprovedPages', () => {
       machine,
       snapshot,
       approvedPaths: [relPath],
-      spaceId: 'sp-1'
+      spaceId: 'sp-1',
     })
     expect(outcome.conflicts).toEqual([{ path: relPath, pageId: '1001', remoteVersion: 9 }])
     expect(outcome.uploaded).toHaveLength(0)
@@ -144,17 +153,23 @@ describe('pushApprovedPages', () => {
       machine,
       snapshot,
       approvedPaths: [relPath],
-      spaceId: 'sp-1'
+      spaceId: 'sp-1',
     })
     expect(outcome.failed[0]?.error).toContain('push할 수 없습니다')
     expect(outcome.uploaded).toHaveLength(0)
   })
 })
 
-function freshSnapshot(absPath: string): { capturedAt: string; entries: Map<string, { hash: string }> } {
+function freshSnapshot(absPath: string): {
+  capturedAt: string
+  entries: Map<string, { hash: string }>
+} {
   const { createHash } = require('node:crypto') as typeof import('node:crypto')
   const hash = createHash('sha256').update(readFileSync(absPath)).digest('hex')
-  return { capturedAt: new Date().toISOString(), entries: new Map([['spaces/DEV/가이드/index.md', { hash }]]) }
+  return {
+    capturedAt: new Date().toISOString(),
+    entries: new Map([['spaces/DEV/가이드/index.md', { hash }]]),
+  }
 }
 
 async function hashOf(absPath: string): Promise<string> {

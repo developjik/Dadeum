@@ -1,12 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { ConfluenceClient } from '../../core/confluence/client'
-import { storageToMarkdown } from '../../core/converter/storageToMarkdown'
 import { markdownToStorage } from '../../core/converter/markdownToStorage'
-import { machineFor } from './machines'
+import { storageToMarkdown } from '../../core/converter/storageToMarkdown'
 import { fileHashOf } from '../../core/store/hash'
 import type { SyncStateDb } from '../../core/store/syncState'
-import { renderPageFile, parsePageFile } from '../../core/store/workspace'
+import { parsePageFile, renderPageFile } from '../../core/store/workspace'
+import { machineFor } from './machines'
 
 export type ConflictChoice = 'overwrite' | 'take-remote' | 'manual'
 
@@ -43,14 +43,14 @@ export async function resolveConflict(options: {
         pageId,
         currentVersion: remote.version,
         title: meta.title,
-        storageValue
+        storageValue,
       })
       if (updated.version !== remote.version + 1) {
         throw new Error(`버전 증가 확인 실패: 기대 ${remote.version + 1}, 응답 ${updated.version}`)
       }
       const updatedRaw = renderPageFile(
         { ...meta, version: updated.version, syncedAt: new Date().toISOString() },
-        body
+        body,
       )
       writeFileSync(absPath, updatedRaw, 'utf8')
       db.upsertPage({
@@ -61,7 +61,7 @@ export async function resolveConflict(options: {
         version: updated.version,
         parentId: meta.parentId,
         contentHash: fileHashOf(updatedRaw),
-        updatedAt: null
+        updatedAt: null,
       })
       return { applied: 'overwrite' }
     } finally {
@@ -75,13 +75,19 @@ export async function resolveConflict(options: {
     const ts = new Date().toISOString().replace(/[:.]/g, '-')
     let backupPath: string | undefined
     if (existsSync(absPath)) {
-      backupPath = join(workspaceRoot, '.sync', 'trash', ts, path.replace(/\/index\.md$/, '.local-backup.md'))
+      backupPath = join(
+        workspaceRoot,
+        '.sync',
+        'trash',
+        ts,
+        path.replace(/\/index\.md$/, '.local-backup.md'),
+      )
       mkdirSync(dirname(backupPath), { recursive: true })
       writeFileSync(backupPath, readFileSync(absPath)) // 로컬 변경 1회 백업(trash는 allowlist 밖)
     }
     const updatedRaw = renderPageFile(
       { ...currentMeta(absPath), version: remote.version, syncedAt: new Date().toISOString() },
-      markdown
+      markdown,
     )
     writeFileSync(absPath, updatedRaw, 'utf8')
     db.updateContentHash(pageId, fileHashOf(updatedRaw))

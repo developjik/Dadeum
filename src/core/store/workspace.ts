@@ -19,7 +19,7 @@ export function workspaceLayout(root: string): WorkspaceLayout {
     syncDir: p(['.sync']),
     stateDb: p(['.sync', 'sync-state.db']),
     trashDir: p(['.sync', 'trash']),
-    spacesRoot: p(['spaces'])
+    spacesRoot: p(['spaces']),
   }
 }
 
@@ -36,10 +36,6 @@ export function dirSafeSpaceKey(spaceKey: string): string {
   return spaceKey.replace(/^~/, 'personal-')
 }
 
-export function spaceMetaFile(layout: WorkspaceLayout, spaceKey: string): string {
-  return `${spaceDir(layout, spaceKey)}/_space.yaml`
-}
-
 /**
  * 제목 → 파일시스템 안전 슬러그:
  * NFC 정규화, OS 금지문자/제어문자 제거, 공백→하이픈, 최대 80자.
@@ -48,6 +44,7 @@ export function spaceMetaFile(layout: WorkspaceLayout, spaceKey: string): string
 export function slugify(title: string): string {
   const nfc = title.normalize('NFC')
   const cleaned = nfc
+    // biome-ignore lint/suspicious/noControlCharactersInRegex: 제목에서 제어문자·금지문자를 제거하는 것이 목적이다
     .replace(/[\u0000-\u001f<>:"/\\|?*]/g, ' ')
     .replace(/[\u007f-\u009f]/g, ' ')
     .replace(/\s+/g, ' ')
@@ -60,9 +57,28 @@ export function slugify(title: string): string {
 }
 
 const OS_RESERVED = new Set([
-  'CON', 'PRN', 'AUX', 'NUL',
-  'COM1', 'COM2', 'COM3', 'COM4', 'COM5', 'COM6', 'COM7', 'COM8', 'COM9',
-  'LPT1', 'LPT2', 'LPT3', 'LPT4', 'LPT5', 'LPT6', 'LPT7', 'LPT8', 'LPT9'
+  'CON',
+  'PRN',
+  'AUX',
+  'NUL',
+  'COM1',
+  'COM2',
+  'COM3',
+  'COM4',
+  'COM5',
+  'COM6',
+  'COM7',
+  'COM8',
+  'COM9',
+  'LPT1',
+  'LPT2',
+  'LPT3',
+  'LPT4',
+  'LPT5',
+  'LPT6',
+  'LPT7',
+  'LPT8',
+  'LPT9',
 ])
 
 /** 슬러그 충돌 병합 규칙(F1): 동일 부모에서 충돌 시 `slug-<pageId 하위 6자>`. */
@@ -72,18 +88,6 @@ export function pageSlug(title: string, pageId: string, siblingSlugs: Set<string
   if (!siblingSlugs.has(probe)) return probe
   const suffix = pageId.slice(-6)
   return `${probe}-${suffix}`
-}
-
-export function pageDirectory(spaceKey: string, slug: string): string {
-  return `spaces/${spaceKey}/${slug}`
-}
-
-export function pageIndexFile(spaceKey: string, slug: string): string {
-  return `${pageDirectory(spaceKey, slug)}/index.md`
-}
-
-export function attachmentDir(spaceKey: string, slug: string): string {
-  return `${pageDirectory(spaceKey, slug)}/attachments`
 }
 
 /**
@@ -137,7 +141,7 @@ export function renderPageFile(meta: PageFrontmatter, markdownBody: string): str
     `syncedAt: ${meta.syncedAt === null ? 'null' : JSON.stringify(meta.syncedAt)}`,
     '---',
     '',
-    markdownBody
+    markdownBody,
   ]
   return lines.join('\n')
 }
@@ -167,12 +171,21 @@ export function parsePageFile(raw: string): { meta: PageFrontmatter; body: strin
       spaceKey: requireValue('spaceKey'),
       title: requireValue('title'),
       version: Number(requireValue('version')),
-      parentId: parseScalar(values.get('parentId') ?? 'null') === 'null' ? null : parseScalar(values.get('parentId')!),
+      parentId:
+        parseScalar(values.get('parentId') ?? 'null') === 'null'
+          ? null
+          : parseScalar(values.get('parentId')!),
       url: requireValue('url'),
-      updatedAt: parseScalar(values.get('updatedAt') ?? 'null') === 'null' ? null : parseScalar(values.get('updatedAt')!),
-      syncedAt: parseScalar(values.get('syncedAt') ?? 'null') === 'null' ? null : parseScalar(values.get('syncedAt')!)
+      updatedAt:
+        parseScalar(values.get('updatedAt') ?? 'null') === 'null'
+          ? null
+          : parseScalar(values.get('updatedAt')!),
+      syncedAt:
+        parseScalar(values.get('syncedAt') ?? 'null') === 'null'
+          ? null
+          : parseScalar(values.get('syncedAt')!),
     },
-    body
+    body,
   }
 }
 

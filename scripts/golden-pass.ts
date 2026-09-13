@@ -8,18 +8,20 @@
 import { existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { ConfluenceClient } from '../src/core/confluence/client'
-import { SyncStateDb } from '../src/core/store/syncState'
-import { pullFullSpace, pullSinglePage } from '../src/main/sync/pullService'
-import { markdownLineDiff } from '../src/core/push/diff'
 import { computeChangeSet } from '../src/core/push/changeSet'
+import { markdownLineDiff } from '../src/core/push/diff'
+import { SyncStateDb } from '../src/core/store/syncState'
 import { dirSafeSpaceKey } from '../src/core/store/workspace'
+import { pullFullSpace, pullSinglePage } from '../src/main/sync/pullService'
 
 const baseUrl = process.env.CONFLUENCE_BASE_URL
 const email = process.env.CONFLUENCE_EMAIL
 const apiToken = process.env.CONFLUENCE_API_TOKEN
 
 if (!baseUrl || !email || !apiToken) {
-  console.error('골든 패스에는 CONFLUENCE_BASE_URL / CONFLUENCE_EMAIL / CONFLUENCE_API_TOKEN 환경변수가 필요합니다')
+  console.error(
+    '골든 패스에는 CONFLUENCE_BASE_URL / CONFLUENCE_EMAIL / CONFLUENCE_API_TOKEN 환경변수가 필요합니다',
+  )
   process.exit(2)
 }
 
@@ -35,9 +37,10 @@ const TEST_TITLE = 'Confluence Local Golden Pass Test'
 async function main(): Promise<void> {
   // 0. 인증 계정의 개인 스페이스를 샌드박스로 사용(공용 콘텐츠 무영향)
   const meResponse = await fetch(`${baseUrl}/wiki/rest/api/user/current`, {
-    headers: { Authorization: `Basic ${Buffer.from(`${email}:${apiToken}`).toString('base64')}` }
+    headers: { Authorization: `Basic ${Buffer.from(`${email}:${apiToken}`).toString('base64')}` },
   })
-  if (!meResponse.ok) throw new Error(`인증 실패(${meResponse.status}) — 이메일/API 토큰을 확인하세요`)
+  if (!meResponse.ok)
+    throw new Error(`인증 실패(${meResponse.status}) — 이메일/API 토큰을 확인하세요`)
   const me = (await meResponse.json()) as { accountId?: string }
   const accountId = me.accountId
   if (!accountId) throw new Error('현재 계정 id를 확인할 수 없습니다')
@@ -58,7 +61,7 @@ async function main(): Promise<void> {
     storageValue:
       '<p>골든 패스 초기 본문</p>' +
       '<ac:structured-macro ac:name="info"><ac:parameter ac:name="title">E2E</ac:parameter>' +
-      '<ac:rich-text-body><p>이 페이지는 자동 생성된 테스트 페이지입니다.</p></ac:rich-text-body></ac:structured-macro>'
+      '<ac:rich-text-body><p>이 페이지는 자동 생성된 테스트 페이지입니다.</p></ac:rich-text-body></ac:structured-macro>',
   })
   console.log(`[생성] 테스트 페이지: ${created.pageId} (v${created.version})`)
 
@@ -68,8 +71,13 @@ async function main(): Promise<void> {
     space: sandbox,
     workspaceRoot,
     db,
-    summary: { id: created.pageId, title: created.title, version: created.version, parentId: created.parentId },
-    dir: `spaces/${dirSafeSpaceKey(sandbox.key)}/${created.pageId}-golden`
+    summary: {
+      id: created.pageId,
+      title: created.title,
+      version: created.version,
+      parentId: created.parentId,
+    },
+    dir: `spaces/${dirSafeSpaceKey(sandbox.key)}/${created.pageId}-golden`,
   })
 
   // 4. 채팅 → Claude Code 편집(AC-2): 생성된 페이지 파일만 수정 지시
@@ -84,7 +92,7 @@ async function main(): Promise<void> {
   const handle = adapter.start({
     prompt: `index.md 파일의 마지막에 '## 골든 패스 확인' 문단을 추가해줘. 이 파일 외에는 아무것도 수정하지 마.`,
     cwd: join(workspaceRoot, 'spaces', dirSafeSpaceKey(sandbox.key)),
-    timeoutMs: 10 * 60 * 1000
+    timeoutMs: 10 * 60 * 1000,
   })
   handle.onEvent((event) => {
     if (event.type === 'text') process.stdout.write(`[에이전트] ${event.value}\n`)
@@ -100,7 +108,9 @@ async function main(): Promise<void> {
 
   // 5. diff 승인(AC-3): 변경 세트 산출 → 스냅샷 캡처(= 자동 골든 패스의 승인)
   const changeset = computeChangeSet(workspaceRoot, db, sandbox.key)
-  console.log(`[AC-3] 변경 세트: modified ${changeset.modified.length}, added ${changeset.added.length}`)
+  console.log(
+    `[AC-3] 변경 세트: modified ${changeset.modified.length}, added ${changeset.added.length}`,
+  )
   const { captureSnapshot } = await import('../src/core/push/approval')
   const snapshot = captureSnapshot(workspaceRoot, [relToRoot])
 
@@ -114,7 +124,7 @@ async function main(): Promise<void> {
     machine,
     snapshot,
     approvedPaths: [relToRoot],
-    spaceId: sandbox.id
+    spaceId: sandbox.id,
   })
   if (outcome.uploaded.length !== 1 || outcome.failed.length > 0) {
     throw new Error(`push 실패: ${JSON.stringify(outcome)}`)
@@ -123,11 +133,11 @@ async function main(): Promise<void> {
   console.log(`[AC-4] push 완료: 새 버전 ${newVersion}`)
 
   const remote = await client.getPageStorage(created.pageId)
-  if (remote.version !== newVersion) throw new Error(`원격 버전 불일치: ${remote.version} != ${newVersion}`)
+  if (remote.version !== newVersion)
+    throw new Error(`원격 버전 불일치: ${remote.version} != ${newVersion}`)
   console.log(`[AC-4] Confluence 반영 확인: v${remote.version}`)
   console.log('골든 패스 통과 ✅  (AC-1 → AC-4)')
 }
-
 
 main().catch((error: unknown) => {
   console.error('골든 패스 실패:', error instanceof Error ? error.message : error)

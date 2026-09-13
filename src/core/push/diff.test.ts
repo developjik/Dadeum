@@ -11,6 +11,9 @@ describe('markdownLineDiff', () => {
   })
 
   it('동일 텍스트는 변경이 없다', () => {
-    expect(summarizeChanges(markdownLineDiff('same\n', 'same\n'))).toEqual({ addedLines: 0, removedLines: 0 })
+    expect(summarizeChanges(markdownLineDiff('same\n', 'same\n'))).toEqual({
+      addedLines: 0,
+      removedLines: 0,
+    })
   })
 })

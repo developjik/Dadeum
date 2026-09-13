@@ -3,8 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { SyncStateDb } from '../store/syncState'
-import { computeChangeSet } from './changeSet'
 import { captureSnapshot, verifySnapshot } from './approval'
+import { computeChangeSet } from './changeSet'
 
 function setupWorkspace(): { root: string; db: SyncStateDb } {
   const root = mkdtempSync(join(tmpdir(), 'push-cs-'))
@@ -12,7 +12,7 @@ function setupWorkspace(): { root: string; db: SyncStateDb } {
   mkdirSync(join(root, 'spaces/DEV/가이드'), { recursive: true })
   writeFileSync(
     join(root, 'spaces/DEV/가이드/index.md'),
-    '---\npageId: "1001"\nspaceKey: "DEV"\ntitle: "가이드"\nversion: 2\nparentId: null\nurl: "https://acme.atlassian.net/wiki/spaces/DEV/pages/1001"\nupdatedAt: null\nsyncedAt: null\n---\n\n본문'
+    '---\npageId: "1001"\nspaceKey: "DEV"\ntitle: "가이드"\nversion: 2\nparentId: null\nurl: "https://acme.atlassian.net/wiki/spaces/DEV/pages/1001"\nupdatedAt: null\nsyncedAt: null\n---\n\n본문',
   )
   const db = new SyncStateDb(join(root, '.sync', 'sync-state.db'))
   db.upsertPage({
@@ -22,7 +22,7 @@ function setupWorkspace(): { root: string; db: SyncStateDb } {
     title: '가이드',
     version: 2,
     parentId: null,
-    contentHash: 'stale-hash' // 파일은 새로 쓰여졌으므로 dirty
+    contentHash: 'stale-hash', // 파일은 새로 쓰여졌으므로 dirty
   })
   return { root, db }
 }
@@ -41,7 +41,7 @@ describe('computeChangeSet', () => {
     mkdirSync(join(root, 'spaces/DEV/신규'), { recursive: true })
     writeFileSync(
       join(root, 'spaces/DEV/신규/index.md'),
-      '---\npageId: null\nspaceKey: "DEV"\ntitle: "신규"\nversion: 0\nparentId: null\nurl: ""\nupdatedAt: null\nsyncedAt: null\n---\n\n새 문서'
+      '---\npageId: null\nspaceKey: "DEV"\ntitle: "신규"\nversion: 0\nparentId: null\nurl: ""\nupdatedAt: null\nsyncedAt: null\n---\n\n새 문서',
     )
     const changes = computeChangeSet(root, db, 'DEV')
     expect(changes.added).toHaveLength(1)
@@ -57,7 +57,7 @@ describe('computeChangeSet', () => {
       title: '사라진',
       version: 1,
       parentId: null,
-      contentHash: 'h'
+      contentHash: 'h',
     })
     const changes = computeChangeSet(root, db, 'DEV')
     expect(changes.missing.map((page) => page.pageId)).toContain('2002')

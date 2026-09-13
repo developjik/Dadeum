@@ -9,7 +9,7 @@ export interface PollTimer {
 
 export const realTimer: PollTimer = {
   setTimeout: (fn, ms) => setTimeout(fn, ms),
-  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>)
+  clearTimeout: (handle) => clearTimeout(handle as ReturnType<typeof setTimeout>),
 }
 
 /** 기본 주기에 지터(±ratio)를 적용한 다음 폴링 지연(ms)을 계산한다. */
@@ -31,7 +31,7 @@ export class PollScheduler {
       random?: () => number
       /** 폴링을 건너뛰어야 하면 true(agent-run 등). 건너뛰면 연기로 기록한다. */
       shouldSkip?: () => boolean
-    }
+    },
   ) {}
 
   start(): void {
@@ -53,7 +53,11 @@ export class PollScheduler {
     if (!this.running) return
     const timer = this.options.timer ?? realTimer
     const random = this.options.random ?? Math.random
-    const delay = computeNextDelay(this.options.baseIntervalMs, this.options.jitterRatio ?? 0.1, random())
+    const delay = computeNextDelay(
+      this.options.baseIntervalMs,
+      this.options.jitterRatio ?? 0.1,
+      random(),
+    )
     this.handle = timer.setTimeout(() => {
       void this.tick()
     }, delay)

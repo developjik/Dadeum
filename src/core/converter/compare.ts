@@ -38,7 +38,9 @@ function nodesEqual(a: XmlNode, b: XmlNode): boolean {
   return aChildren.every((child, index) => nodesEqual(child, bChildren[index]))
 }
 
-function attributeMap(element: { attributes: { length: number; item(i: number): { name: string; value: string } | null } | null }): Map<string, string> {
+function attributeMap(element: {
+  attributes: { length: number; item(i: number): { name: string; value: string } | null } | null
+}): Map<string, string> {
   const map = new Map<string, string>()
   const attrs = element.attributes
   if (attrs) {

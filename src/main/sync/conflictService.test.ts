@@ -1,10 +1,10 @@
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync, existsSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ConfluenceClient } from '../../core/confluence/client'
-import { SyncStateDb } from '../../core/store/syncState'
 import { fileHashOf } from '../../core/store/hash'
+import { SyncStateDb } from '../../core/store/syncState'
 import { resolveConflict } from './conflictService'
 
 const REMOTE_STORAGE = '<p>서버의 최신 본문</p>'
@@ -19,19 +19,30 @@ function makeClient(): ConfluenceClient {
       const url = String(input)
       const method = init?.method ?? 'GET'
       if (url.includes('/api/v2/pages/1001') && method === 'GET') {
-        return new Response(JSON.stringify({ id: '1001', title: '가이드', version: { number: 3 }, body: { storage: { value: REMOTE_STORAGE } } }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' }
-        })
+        return new Response(
+          JSON.stringify({
+            id: '1001',
+            title: '가이드',
+            version: { number: 3 },
+            body: { storage: { value: REMOTE_STORAGE } },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        )
       }
       if (url.includes('/api/v2/pages/1001') && method === 'PUT') {
-        return new Response(JSON.stringify({ id: '1001', title: '가이드', version: { number: 4 } }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' }
-        })
+        return new Response(
+          JSON.stringify({ id: '1001', title: '가이드', version: { number: 4 } }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        )
       }
       return new Response('{}', { status: 200, headers: { 'Content-Type': 'application/json' } })
-    }) as unknown as typeof fetch
+    }) as unknown as typeof fetch,
   })
 }
 
@@ -43,7 +54,7 @@ function setup(): { root: string; db: SyncStateDb; relPath: string; absPath: str
   const absPath = join(root, relPath)
   writeFileSync(
     absPath,
-    '---\npageId: "1001"\nspaceKey: "DEV"\ntitle: "가이드"\nversion: 2\nparentId: null\nurl: "https://acme.atlassian.net/wiki/spaces/DEV/pages/1001"\nupdatedAt: null\nsyncedAt: null\n---\n\n로컬에서 고친 본문'
+    '---\npageId: "1001"\nspaceKey: "DEV"\ntitle: "가이드"\nversion: 2\nparentId: null\nurl: "https://acme.atlassian.net/wiki/spaces/DEV/pages/1001"\nupdatedAt: null\nsyncedAt: null\n---\n\n로컬에서 고친 본문',
   )
   const db = new SyncStateDb(join(root, '.sync', 'sync-state.db'))
   db.upsertPage({
@@ -53,7 +64,7 @@ function setup(): { root: string; db: SyncStateDb; relPath: string; absPath: str
     title: '가이드',
     version: 2,
     parentId: null,
-    contentHash: fileHashOf('원본과 다른 해시 — 로컬이 dirty')
+    contentHash: fileHashOf('원본과 다른 해시 — 로컬이 dirty'),
   })
   return { root, db, relPath, absPath }
 }
@@ -67,7 +78,7 @@ describe('resolveConflict(ef-8 3지 선택)', () => {
       pageId: '1001',
       client: makeClient(),
       workspaceRoot: root,
-      db
+      db,
     })
     expect(result.applied).toBe('overwrite')
     const raw = readFileSync(absPath, 'utf8')
@@ -82,7 +93,7 @@ describe('resolveConflict(ef-8 3지 선택)', () => {
       pageId: '1001',
       client: makeClient(),
       workspaceRoot: root,
-      db
+      db,
     })
     expect(result.applied).toBe('take-remote')
     expect(result.backupPath).toBeDefined()
@@ -98,7 +109,7 @@ describe('resolveConflict(ef-8 3지 선택)', () => {
       pageId: '1001',
       client: makeClient(),
       workspaceRoot: root,
-      db
+      db,
     })
     expect(result.applied).toBe('manual')
     expect(result.remoteFile).toBeDefined()

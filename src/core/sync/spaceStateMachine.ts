@@ -7,7 +7,13 @@
  */
 export type SpaceSyncState = 'idle' | 'pulling' | 'pushing' | 'agent-run'
 
-export type SpaceSyncAction = 'startPull' | 'endPull' | 'startPush' | 'endPush' | 'startAgentRun' | 'endAgentRun'
+export type SpaceSyncAction =
+  | 'startPull'
+  | 'endPull'
+  | 'startPush'
+  | 'endPush'
+  | 'startAgentRun'
+  | 'endAgentRun'
 
 export class SpaceStateMachine {
   private state: SpaceSyncState = 'idle'
@@ -20,6 +26,11 @@ export class SpaceStateMachine {
   /** agent run 중에 연기된 pull이 대기 중인지. */
   hasDeferredPull(): boolean {
     return this.deferredPull
+  }
+
+  /** 연기된 pull 플래그를 소비한다(폴링 1회 성공 후 정리 — 앱 수명 내 잔존 방지). */
+  clearDeferredPull(): void {
+    this.deferredPull = false
   }
 
   /** push 승인 후 업로드를 시작할 수 있는지(TOCTOU 2차 검사용 — F-2). */

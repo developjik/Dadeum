@@ -1,32 +1,41 @@
-import { registerIpcHandler } from './ipc'
+import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { ConfluenceClient } from '../core/confluence/client'
+import { storageToMarkdown } from '../core/converter/storageToMarkdown'
+import { captureSnapshot, verifySnapshot } from '../core/push/approval'
+import { computeChangeSet } from '../core/push/changeSet'
+import { markdownLineDiff } from '../core/push/diff'
+import { fileHashOf } from '../core/store/hash'
+import { dirSafeSpaceKey } from '../core/store/workspace'
+import { ChatRunService } from './agent/chatService'
+import { ClaudeCodeAdapter } from './agent/claudeCodeAdapter'
 import {
   clearCredentials,
   createClientFromStoredCredentials,
   getConnectionStatus,
-  saveCredentials
+  saveCredentials,
 } from './credentials'
-import { ConfluenceClient } from '../core/confluence/client'
-import { join } from 'node:path'
-import { existsSync, readFileSync } from 'node:fs'
-import { pullSpaceByKey } from './sync/pullService'
-import { stopAllAutoPull } from './sync/pollCoordinator'
-import { ClaudeCodeAdapter } from './agent/claudeCodeAdapter'
-import { ChatRunService } from './agent/chatService'
-import { getWorkspaceDb, isAllowedExternalUrl, listPageTree, readPageFileGuarded, resolveWorkspaceRoot } from './workspaceAccess'
-import { computeChangeSet } from '../core/push/changeSet'
-import { markdownLineDiff } from '../core/push/diff'
-import { storageToMarkdown } from '../core/converter/storageToMarkdown'
-import { captureSnapshot, verifySnapshot } from '../core/push/approval'
+import { registerIpcHandler } from './ipc'
 import { pushApproved } from './push/pushApproval'
-import { resolveConflict, type ConflictChoice } from './sync/conflictService'
-import { pullIncremental } from './sync/pullIncremental'
-import { dirSafeSpaceKey } from '../core/store/workspace'
-import { fileHashOf } from '../core/store/hash'
+import { type ConflictChoice, resolveConflict } from './sync/conflictService'
 import { machineFor } from './sync/machines'
+import {
+  isAutoPullRunning,
+  startAutoPull,
+  stopAllAutoPull,
+  stoppedSpaces,
+} from './sync/pollCoordinator'
+import { pullIncremental } from './sync/pullIncremental'
+import { pullSpaceByKey } from './sync/pullService'
+import {
+  getWorkspaceDb,
+  isAllowedExternalUrl,
+  listPageTree,
+  readPageFileGuarded,
+  resolveWorkspaceRoot,
+} from './workspaceAccess'
 
-
-
-export interface ConnectPayload {
+interface ConnectPayload {
   siteUrl: string
   email: string
   apiToken: string
@@ -58,9 +67,30 @@ function requireClient(): ConfluenceClient {
 const chatRuns = new ChatRunService()
 chatRuns.registerAdapter(new ClaudeCodeAdapter())
 
+/**
+ * 앱 재시작 후 auth:status가 연결 상태를 확인하면 저장된 스페이스의 자동 폴링을 복원한다.
+ * 복원 실패(네트워크 등)는 연결 상태 자체를 실패로 만들지 않는다(다음 pull 시 재시도).
+ */
+async function restoreAutoPull(): Promise<void> {
+  const client = createClientFromStoredCredentials()
+  if (!client) return
+  const db = getWorkspaceDb()
+  for (const spaceKey of stoppedSpaces(db)) {
+    if (isAutoPullRunning(spaceKey)) continue
+    const spaces = await client.listAllSpaces()
+    const space = spaces.find((candidate) => candidate.key === spaceKey)
+    if (!space) continue
+    startAutoPull({ client, space, workspaceRoot: resolveWorkspaceRoot(), db })
+  }
+}
+
 export function registerAuthAndSpaceHandlers(): void {
   registerIpcHandler('auth:connect', (payload) => handleConnect(payload))
-  registerIpcHandler('auth:status', () => getConnectionStatus())
+  registerIpcHandler('auth:status', async () => {
+    const status = getConnectionStatus()
+    if (status.connected) void restoreAutoPull().catch(() => undefined)
+    return status
+  })
   registerIpcHandler('auth:disconnect', () => {
     stopAllAutoPull()
     clearCredentials()
@@ -78,7 +108,14 @@ export function registerAuthAndSpaceHandlers(): void {
     const client = requireClient()
     void client
     const spaceRoot = join(resolveWorkspaceRoot(), 'spaces', dirSafeSpaceKey(spaceKey))
-    return chatRuns.startRun({ sender, adapterName: 'claude-code', spaceKey, prompt, spaceRoot, db: getWorkspaceDb() })
+    return chatRuns.startRun({
+      sender,
+      adapterName: 'claude-code',
+      spaceKey,
+      prompt,
+      spaceRoot,
+      db: getWorkspaceDb(),
+    })
   })
   registerIpcHandler('agent:cancel', (payload) => {
     const runId = String((payload as { runId?: string })?.runId ?? '')
@@ -110,13 +147,14 @@ export function registerAuthAndSpaceHandlers(): void {
       machine: machineFor(spaceKey),
       snapshot,
       approvedPaths: paths,
-      spaceId
+      spaceId,
     })
   })
   registerIpcHandler('conflict:list', (payload) => {
     const spaceKey = String((payload as { spaceKey?: string })?.spaceKey ?? '')
     if (!spaceKey) throw new Error('spaceKey가 필요합니다')
-    const candidates: Array<{ pageId: string; path: string; reason: 'remote-deleted' | 'dirty' }> = []
+    const candidates: Array<{ pageId: string; path: string; reason: 'remote-deleted' | 'dirty' }> =
+      []
     for (const page of getWorkspaceDb().listPagesBySpace(spaceKey)) {
       if (page.remoteDeleted) {
         candidates.push({ pageId: page.pageId, path: page.path, reason: 'remote-deleted' })
@@ -139,7 +177,14 @@ export function registerAuthAndSpaceHandlers(): void {
     const pageId = String(input.pageId ?? '')
     if (!path || !pageId) throw new Error('path와 pageId가 필요합니다')
     const client = requireClient()
-    return resolveConflict({ choice, path, pageId, client, workspaceRoot: resolveWorkspaceRoot(), db: getWorkspaceDb() })
+    return resolveConflict({
+      choice,
+      path,
+      pageId,
+      client,
+      workspaceRoot: resolveWorkspaceRoot(),
+      db: getWorkspaceDb(),
+    })
   })
   registerIpcHandler('spaces:poll', async (payload) => {
     const input = payload as { spaceKey?: string }
@@ -149,7 +194,13 @@ export function registerAuthAndSpaceHandlers(): void {
     const space = (await client.listAllSpaces()).find((candidate) => candidate.key === spaceKey)
     if (!space) throw new Error(`스페이스를 찾을 수 없습니다: ${spaceKey}`)
     const since = new Date(Date.now() - 5 * 60 * 1000).toISOString() // 5분 overlap
-    return await pullIncremental({ client, space, workspaceRoot: resolveWorkspaceRoot(), db: getWorkspaceDb(), sinceIso: since })
+    return await pullIncremental({
+      client,
+      space,
+      workspaceRoot: resolveWorkspaceRoot(),
+      db: getWorkspaceDb(),
+      sinceIso: since,
+    })
   })
   registerIpcHandler('pages:diff', async (payload) => {
     const input = payload as { path?: string }
@@ -189,6 +240,11 @@ export function registerAuthAndSpaceHandlers(): void {
     const space = spaces.find((candidate) => candidate.key === spaceKey)
     if (!space) throw new Error(`스페이스를 찾을 수 없습니다: ${spaceKey}`)
 
-    return await pullSpaceByKey({ client, spaceKey, workspaceRoot: resolveWorkspaceRoot(), db: getWorkspaceDb() })
+    return await pullSpaceByKey({
+      client,
+      spaceKey,
+      workspaceRoot: resolveWorkspaceRoot(),
+      db: getWorkspaceDb(),
+    })
   })
 }

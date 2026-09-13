@@ -11,13 +11,26 @@ const confluenceLocal = {
     return ipcRenderer.invoke(channel, payload)
   },
   /** 에이전트 런 이벤트 스트림(단일 채널 — runId로 구분). */
-  onAgentEvent: (listener: (payload: { runId: string; spaceKey: string; event: unknown }) => void): (() => void) => {
-    const wrapped = (_event: unknown, payload: { runId: string; spaceKey: string; event: unknown }): void => {
+  onAgentEvent: (
+    listener: (payload: { runId: string; spaceKey: string; event: unknown }) => void,
+  ): (() => void) => {
+    const wrapped = (
+      _event: unknown,
+      payload: { runId: string; spaceKey: string; event: unknown },
+    ): void => {
       listener(payload)
     }
     ipcRenderer.on('agent:event', wrapped as never)
     return () => ipcRenderer.removeListener('agent:event', wrapped as never)
-  }
+  },
+  /** 동기화 알림 스트림(폴링 결과 — 충돌 후보·트리 자동 갱신용). */
+  onSyncEvent: (listener: (payload: unknown) => void): (() => void) => {
+    const wrapped = (_event: unknown, payload: unknown): void => {
+      listener(payload)
+    }
+    ipcRenderer.on('sync:event', wrapped as never)
+    return () => ipcRenderer.removeListener('sync:event', wrapped as never)
+  },
 }
 
 export type ConfluenceLocalApi = typeof confluenceLocal

@@ -6,7 +6,7 @@ import {
   renderPageFile,
   slugify,
   spaceDir,
-  workspaceLayout
+  workspaceLayout,
 } from './workspace'
 
 describe('workspaceLayout', () => {
@@ -86,7 +86,7 @@ describe('frontmatter 코덱', () => {
     parentId: null,
     url: 'https://acme.atlassian.net/wiki/spaces/DEV/pages/9007199254740993',
     updatedAt: '2026-09-12T00:00:00.000Z',
-    syncedAt: '2026-09-12T01:00:00.000Z'
+    syncedAt: '2026-09-12T01:00:00.000Z',
   }
 
   it('렌더→파싱 왕복이 손실 없다', () => {

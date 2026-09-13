@@ -18,7 +18,7 @@ describe('buildCsp', () => {
 
   it('기본 출처는 self로 제한한다', () => {
     expect(csp).toContain("default-src 'self'")
-    expect(csp).not.toContain("default-src *")
+    expect(csp).not.toContain('default-src *')
     expect(csp).not.toContain('http:')
   })
 

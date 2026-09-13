@@ -1,0 +1,17 @@
+# 커밋 전: 스테이징된 파일만 Biome 검사·자동 수정(수정분은 자동 재스테이징).
+pre-commit:
+  commands:
+    biome:
+      glob: '*.{js,cjs,mjs,ts,tsx,json}'
+      run: ./node_modules/.bin/biome check --write --no-errors-on-unmatched {staged_files}
+      stage_fixed: true
+
+# 푸시 전: 전 프로젝트 검증(빠른 실패 순).
+pre-push:
+  commands:
+    typecheck:
+      run: pnpm typecheck
+    architecture:
+      run: pnpm arch
+    tests:
+      run: pnpm test

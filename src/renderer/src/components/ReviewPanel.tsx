@@ -3,6 +3,28 @@ import { ko } from '../../../core/i18n/ko'
 import type { ModifiedPage } from '../../../core/push/changeSet'
 import type { LineChange } from '../../../core/push/diff'
 import { useAppStore } from '../state/appStore'
+import { AlertIcon, CheckCircleIcon, DiffIcon } from './icons'
+
+function CheckItem({
+  path,
+  checked,
+  onToggle,
+  children,
+}: {
+  path: string
+  checked: boolean
+  onToggle: () => void
+  children: React.ReactNode
+}): React.ReactElement {
+  return (
+    <div className="cs-item__row">
+      <label className="cs-item__check">
+        <input type="checkbox" checked={checked} onChange={onToggle} aria-label={path} />
+      </label>
+      {children}
+    </div>
+  )
+}
 
 export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElement {
   const loadChangeset = useAppStore((s) => s.loadChangeset)
@@ -13,6 +35,7 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
   const pushOutcome = useAppStore((s) => s.pushOutcome)
   const busy = useAppStore((s) => s.busy)
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  const [confirming, setConfirming] = useState(false)
 
   const toggle = (path: string): void => {
     const next = new Set(selected)
@@ -21,97 +44,208 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
     setSelected(next)
   }
 
+  const total = changeset
+    ? changeset.modified.length + changeset.added.length + changeset.attachments.length
+    : 0
+
   return (
-    <section aria-label="upload-review">
-      <h2>{ko.review.diffTitle}</h2>
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => {
-          setSelected(new Set())
-          void loadChangeset(spaceKey)
-        }}
-      >
-        {ko.review.reviewUpload}
-      </button>
+    <section className="review-pane" aria-label="upload-review">
+      <div className="review-pane__toolbar">
+        <div className="review-pane__summary">
+          {changeset ? (
+            <>
+              {changeset.modified.length > 0 ? (
+                <span className="badge badge--accent">
+                  {ko.review.modifiedCount(changeset.modified.length)}
+                </span>
+              ) : null}
+              {changeset.added.length > 0 ? (
+                <span className="badge badge--success">
+                  {ko.review.addedCount(changeset.added.length)}
+                </span>
+              ) : null}
+              {changeset.attachments.length > 0 ? (
+                <span className="badge badge--neutral">
+                  {ko.review.attachmentCount(changeset.attachments.length)}
+                </span>
+              ) : null}
+              {total === 0 ? <span className="badge badge--neutral">{ko.review.empty}</span> : null}
+            </>
+          ) : null}
+        </div>
+        <button
+          type="button"
+          className="btn btn--default"
+          disabled={busy}
+          onClick={() => {
+            setSelected(new Set())
+            void loadChangeset(spaceKey)
+          }}
+        >
+          {ko.review.recheck}
+        </button>
+      </div>
 
-      {changeset ? (
+      {changeset && total > 0 ? (
         <>
-          {changeset.modified.length === 0 && changeset.added.length === 0 ? <p>{ko.review.empty}</p> : null}
-          <ul>
-            {changeset.modified.map((page: ModifiedPage) => (
-              <li key={page.path}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(page.path)}
-                    onChange={() => toggle(page.path)}
-                  />
-                  {page.path}
-                </label>
-                <button type="button" onClick={() => void openDiff(page.path)}>
-                  {ko.review.diffLabel}
-                </button>
-                {diffs[page.path] ? <DiffView changes={diffs[page.path]!} /> : null}
-              </li>
-            ))}
-            {changeset.attachments.map((attachment) => (
-              <li key={attachment.path}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(attachment.path)}
-                    onChange={() => toggle(attachment.path)}
-                  />
-                  {ko.review.attachmentPrefix} {attachment.fileName} ({attachment.path})
-                </label>
-              </li>
-            ))}
-            {changeset.added.map((page) => (
-              <li key={page.path}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={selected.has(page.path)}
-                    onChange={() => toggle(page.path)}
-                  />
-                  {ko.review.addedPrefix} {page.title} ({page.path})
-                </label>
-              </li>
-            ))}
-          </ul>
-          <button
-            type="button"
-            disabled={busy || selected.size === 0}
-            onClick={() => void approveUpload(spaceKey, [...selected])}
-          >
-            {ko.review.approve}
-          </button>
+          {changeset.modified.length > 0 ? (
+            <div className="changeset-group">
+              <span className="changeset-group__label">{ko.review.modified}</span>
+              <ul className="cs-list">
+                {changeset.modified.map((page: ModifiedPage) => (
+                  <li key={page.path} className="cs-item">
+                    <CheckItem
+                      path={page.path}
+                      checked={selected.has(page.path)}
+                      onToggle={() => toggle(page.path)}
+                    >
+                      <span className="cs-item__path">{page.path}</span>
+                      <button
+                        type="button"
+                        className="btn btn--default"
+                        onClick={() => void openDiff(page.path)}
+                      >
+                        <DiffIcon />
+                        {ko.review.diffLabel}
+                      </button>
+                    </CheckItem>
+                    {diffs[page.path] ? <DiffView changes={diffs[page.path]!} /> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
 
+          {changeset.added.length > 0 ? (
+            <div className="changeset-group">
+              <span className="changeset-group__label">{ko.review.added}</span>
+              <ul className="cs-list">
+                {changeset.added.map((page) => (
+                  <li key={page.path} className="cs-item">
+                    <CheckItem
+                      path={page.path}
+                      checked={selected.has(page.path)}
+                      onToggle={() => toggle(page.path)}
+                    >
+                      <span className="cs-item__label">{page.title}</span>
+                      <span className="cs-item__path">{page.path}</span>
+                      <span className="badge badge--success">{ko.review.added}</span>
+                    </CheckItem>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {changeset.attachments.length > 0 ? (
+            <div className="changeset-group">
+              <span className="changeset-group__label">{ko.review.attachments}</span>
+              <ul className="cs-list">
+                {changeset.attachments.map((attachment) => (
+                  <li key={attachment.path} className="cs-item">
+                    <CheckItem
+                      path={attachment.path}
+                      checked={selected.has(attachment.path)}
+                      onToggle={() => toggle(attachment.path)}
+                    >
+                      <span className="cs-item__label">{attachment.fileName}</span>
+                      <span className="cs-item__path">{attachment.path}</span>
+                      <span className="badge badge--neutral">{ko.review.attachments}</span>
+                    </CheckItem>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          <div className="review-actions">
+            <span className="review-actions__hint">{ko.review.selectedCount(selected.size)}</span>
+            {confirming ? (
+              <div
+                className="review-actions__confirm"
+                role="alertdialog"
+                aria-label="confirm-upload"
+              >
+                <span className="review-actions__confirm-text">
+                  {ko.review.confirmUpload(selected.size)}
+                </span>
+                <button
+                  type="button"
+                  className="btn btn--danger"
+                  disabled={busy}
+                  onClick={() => {
+                    setConfirming(false)
+                    void (async () => {
+                      await approveUpload(spaceKey, [...selected])
+                      setSelected(new Set())
+                    })()
+                  }}
+                >
+                  {ko.review.uploadConfirm}
+                </button>
+                <button
+                  type="button"
+                  className="btn btn--subtle"
+                  disabled={busy}
+                  onClick={() => setConfirming(false)}
+                >
+                  {ko.common.cancel}
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                className="btn btn--primary"
+                disabled={busy || selected.size === 0}
+                onClick={() => setConfirming(true)}
+              >
+                {ko.review.approve}
+              </button>
+            )}
+          </div>
         </>
       ) : null}
 
       {pushOutcome ? (
-        <div>
+        <div className="outcome-list">
           {pushOutcome.uploaded.map((item) => (
-            <p key={item.path}>
-              {ko.review.uploaded}: {item.path} (v{item.newVersion})
-            </p>
+            <div key={item.path} className="outcome-row outcome-row--success">
+              <CheckCircleIcon size={14} />
+              <span className="outcome-row__path">{item.path}</span>
+              <span className="outcome-row__detail">
+                {ko.review.uploaded} · v{item.newVersion}
+              </span>
+            </div>
           ))}
           {pushOutcome.conflicts.map((item) => (
-            <p key={item.path} role="alert">
-              {ko.review.conflictNotice}: {item.path}
-            </p>
+            <div key={item.path} className="outcome-row outcome-row--warning" role="alert">
+              <AlertIcon size={14} />
+              <span className="outcome-row__path">{item.path}</span>
+              <span className="outcome-row__detail">{ko.review.conflictNotice}</span>
+            </div>
           ))}
           {pushOutcome.remoteDeleted.map((item) => (
-            <p key={item.path} role="alert">
-              {ko.review.remoteDeletedNotice}: {item.path}
-            </p>
+            <div key={item.path} className="outcome-row outcome-row--warning" role="alert">
+              <AlertIcon size={14} />
+              <span className="outcome-row__path">{item.path}</span>
+              <span className="outcome-row__detail">{ko.review.remoteDeletedNotice}</span>
+            </div>
+          ))}
+          {pushOutcome.deletedAttachments.map((item) => (
+            <div key={item.path} className="outcome-row outcome-row--neutral">
+              <AlertIcon size={14} />
+              <span className="outcome-row__path">{item.fileName}</span>
+              <span className="outcome-row__detail">{ko.review.deletedAttachment}</span>
+            </div>
           ))}
           {pushOutcome.failed.map((item) => (
-            <p key={item.path} role="alert">
-              {ko.review.failedNotice}: {item.path} — {item.error}
-            </p>
+            <div key={item.path} className="outcome-row outcome-row--danger" role="alert">
+              <AlertIcon size={14} />
+              <span className="outcome-row__path">{item.path}</span>
+              <span className="outcome-row__detail">
+                {ko.review.failedNotice} · {item.error}
+              </span>
+            </div>
           ))}
         </div>
       ) : null}
@@ -122,16 +256,17 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
 function DiffView({ changes }: { changes: LineChange[] }): React.ReactElement {
   return (
     <pre className="diff-view">
-      {changes.flatMap((change) =>
+      {changes.flatMap((change, changeIndex) =>
         change.value
           .split('\n')
           .filter((line: string) => line.length > 0)
-          .map((line: string, index: number) => (
-            <div key={index} className={`diff-${change.type}`}>
+          .map((line, index) => (
+            // biome-ignore lint/suspicious/noArrayIndexKey: diff 줄에는 안정적 식별자가 없고 changeIndex 조합으로 형제 간 키 충돌을 막는다
+            <div key={`${changeIndex}-${index}`} className={`diff-line diff-line--${change.type}`}>
               {change.type === 'added' ? '+ ' : change.type === 'removed' ? '- ' : '  '}
               {line}
             </div>
-          ))
+          )),
       )}
     </pre>
   )

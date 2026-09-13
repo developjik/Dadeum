@@ -1,8 +1,8 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ConfluenceClient, ConfluenceSpace } from '../../core/confluence/client'
-import type { SyncStateDb } from '../../core/store/syncState'
 import { fileHashOf } from '../../core/store/hash'
+import type { SyncStateDb } from '../../core/store/syncState'
 import { dirSafeSpaceKey, slugify } from '../../core/store/workspace'
 import { machineFor } from './machines'
 import { pullSinglePage } from './pullService'
@@ -31,7 +31,7 @@ export async function pullIncremental(options: {
 
     for (const pageId of changedIds) {
       const record = db.getPage(pageId)
-      if (record && record.remoteDeleted) continue // 원격 삭제 수용 후 재생성은 사용자 안내 대상
+      if (record?.remoteDeleted) continue // 원격 삭제 수용 후 재생성은 사용자 안내 대상
 
       const detail = await client.getPageStorage(pageId)
       const dir = record
@@ -40,7 +40,7 @@ export async function pullIncremental(options: {
 
       // dirty 보호: 로컬 hash가 last-synced와 다르면 건드리지 않는다
       const absPath = join(workspaceRoot, dir, 'index.md')
-      if (record && record.contentHash && existsSync(absPath)) {
+      if (record?.contentHash && existsSync(absPath)) {
         if (fileHashOf(readFileSync(absPath)) !== record.contentHash) {
           skippedDirty.push(pageId)
           continue
@@ -52,8 +52,13 @@ export async function pullIncremental(options: {
         space,
         workspaceRoot,
         db,
-        summary: { id: detail.id, title: detail.title, version: detail.version, parentId: record?.parentId ?? null },
-        dir
+        summary: {
+          id: detail.id,
+          title: detail.title,
+          version: detail.version,
+          parentId: record?.parentId ?? null,
+        },
+        dir,
       })
       updated.push(pageId)
     }

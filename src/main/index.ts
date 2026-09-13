@@ -1,10 +1,10 @@
-import { app, BrowserWindow, session } from 'electron'
 import { join } from 'node:path'
+import { app, BrowserWindow, session } from 'electron'
 import { buildCsp } from '../core/security/csp'
 import { isAllowedNavigation } from '../core/security/navigation'
+import { registerAuthAndSpaceHandlers } from './authHandlers'
 import { registerIpcHandlers } from './ipc'
 import { createMainWindow } from './window'
-import { registerAuthAndSpaceHandlers } from './authHandlers'
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 
@@ -22,8 +22,8 @@ app.whenReady().then(() => {
     callback({
       responseHeaders: {
         ...details.responseHeaders,
-        'Content-Security-Policy': [buildCsp()]
-      }
+        'Content-Security-Policy': [buildCsp()],
+      },
     })
   })
 

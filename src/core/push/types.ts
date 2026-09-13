@@ -4,4 +4,6 @@ export interface PushOutcome {
   conflicts: Array<{ path: string; pageId: string; remoteVersion: number }>
   remoteDeleted: Array<{ path: string; pageId: string }>
   failed: Array<{ path: string; error: string }>
+  /** 로컬에서 삭제되어 원격에서도 정리된 첨부 */
+  deletedAttachments: Array<{ path: string; fileName: string }>
 }

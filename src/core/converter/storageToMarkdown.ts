@@ -1,3 +1,5 @@
+import type { Element, Node } from '@xmldom/xmldom'
+import { carrierFence, contentHash, inlineRefToken } from './carriers'
 import {
   escapeStorageAttr,
   isElement,
@@ -6,10 +8,8 @@ import {
   localName,
   parseStorageFragment,
   serializeNode,
-  textContent
+  textContent,
 } from './xml'
-import { carrierFence, contentHash, inlineRefToken } from './carriers'
-import type { Element, Node } from '@xmldom/xmldom'
 
 export interface StorageToMarkdownResult {
   markdown: string
@@ -23,9 +23,38 @@ interface ConversionContext {
 }
 
 /** 블록 수준 화이트리스트: 이 요소들은 Markdown 구조로 손실 없이 변환된다. */
-const BLOCK_WHITELIST = new Set(['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'ul', 'ol', 'li', 'table', 'blockquote', 'hr', 'pre'])
+const BLOCK_WHITELIST = new Set([
+  'p',
+  'h1',
+  'h2',
+  'h3',
+  'h4',
+  'h5',
+  'h6',
+  'ul',
+  'ol',
+  'li',
+  'table',
+  'blockquote',
+  'hr',
+  'pre',
+])
 
-const INLINE_WHITELIST = new Set(['strong', 'b', 'em', 'i', 'code', 'a', 'br', 's', 'strike', 'del', 'span', 'sub', 'sup'])
+const INLINE_WHITELIST = new Set([
+  'strong',
+  'b',
+  'em',
+  'i',
+  'code',
+  'a',
+  'br',
+  's',
+  'strike',
+  'del',
+  'span',
+  'sub',
+  'sup',
+])
 
 const MAX_CONVERT_DEPTH = 200
 
@@ -37,7 +66,7 @@ export function storageToMarkdown(storageXml: string): StorageToMarkdownResult {
   let markdown = blocks.join('\n\n')
   if (context.carriers.length > 0) {
     // 인라인 승격 조각들의 본문은 문서 끝 캐리어 구역에 모은다(역변환 때 소비됨).
-    markdown += '\n\n<!-- confluence:carriers -->\n\n' + context.carriers.join('\n\n')
+    markdown += `\n\n<!-- confluence:carriers -->\n\n${context.carriers.join('\n\n')}`
   }
   return { markdown, promotedInlineCount: context.promotedInlineCount }
 }
@@ -158,7 +187,12 @@ function convertInline(node: Node, context: ConversionContext, depth = 0): strin
   return inlineRefToken(hash)
 }
 
-function convertList(node: Element, context: ConversionContext, startIndex?: number, depth = 0): string {
+function convertList(
+  node: Element,
+  context: ConversionContext,
+  startIndex?: number,
+  depth = 0,
+): string {
   const lines: string[] = []
   let index = startIndex ?? 1
   for (const child of Array.from(node.childNodes)) {
@@ -166,22 +200,29 @@ function convertList(node: Element, context: ConversionContext, startIndex?: num
     const marker = startIndex === undefined ? '-' : `${index}.`
     const nestedLists = Array.from(child.childNodes).filter(
       (grandchild): grandchild is Element =>
-        isElement(grandchild) && (localName(grandchild) === 'ul' || localName(grandchild) === 'ol')
+        isElement(grandchild) && (localName(grandchild) === 'ul' || localName(grandchild) === 'ol'),
     )
     // li의 직접 텍스트/인라인만 마커 뒤에 붙이고, 중첩 목록은 들여쓰기로 처리
-    const cloneContent = Array.from(child.childNodes).filter((grandchild) => !nestedLists.includes(grandchild as Element))
+    const cloneContent = Array.from(child.childNodes).filter(
+      (grandchild) => !nestedLists.includes(grandchild as Element),
+    )
     const inlineText = cloneContent
       .map((grandchild) => convertInlineOrBlockShallow(grandchild, context, depth))
       .join('')
       .trim()
     lines.push(`${marker} ${inlineText}`)
     for (const nested of nestedLists) {
-      const nestedMarkdown = convertList(nested, context, localName(nested) === 'ol' ? 1 : undefined, depth + 1)
+      const nestedMarkdown = convertList(
+        nested,
+        context,
+        localName(nested) === 'ol' ? 1 : undefined,
+        depth + 1,
+      )
       lines.push(
         nestedMarkdown
           .split('\n')
           .map((line) => (line.length > 0 ? `  ${line}` : line))
-          .join('\n')
+          .join('\n'),
       )
     }
     if (startIndex !== undefined) index += 1
@@ -201,7 +242,7 @@ function convertInlineOrBlockShallow(node: Node, context: ConversionContext, dep
 function convertPre(node: Element): string {
   const codeNode = Array.from(node.getElementsByTagName('code'))[0]
   const content = codeNode ? (codeNode.textContent ?? '') : (node.textContent ?? '')
-  return '```\n' + content.replace(/\n$/, '') + '\n```'
+  return `\`\`\`\n${content.replace(/\n$/, '')}\n\`\`\``
 }
 
 function convertTable(node: Element, context: ConversionContext, depth = 0): string {
@@ -210,10 +251,13 @@ function convertTable(node: Element, context: ConversionContext, depth = 0): str
 
   const cellText = (row: Element): string[] => {
     const cells = Array.from(row.childNodes).filter(
-      (child) => isElement(child) && (localName(child) === 'th' || localName(child) === 'td')
+      (child) => isElement(child) && (localName(child) === 'th' || localName(child) === 'td'),
     ) as Element[]
     return cells.map((cell) => {
-      const text = convertInlineChildren(cell, context, depth).replace(/\|/g, '\\|').replace(/\n/g, ' ').trim()
+      const text = convertInlineChildren(cell, context, depth)
+        .replace(/\|/g, '\\|')
+        .replace(/\n/g, ' ')
+        .trim()
       return text.length > 0 ? text : ' '
     })
   }

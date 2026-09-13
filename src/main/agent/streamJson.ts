@@ -17,14 +17,20 @@ export function parseStreamJsonLine(line: string): AgentRunEvent[] {
   const record = parsed as Record<string, unknown>
 
   if (record.type === 'system' && record.subtype === 'init') {
-    return typeof record.session_id === 'string' ? [{ type: 'started', sessionId: record.session_id } as AgentRunEvent] : []
+    return typeof record.session_id === 'string'
+      ? [{ type: 'started', sessionId: record.session_id } as AgentRunEvent]
+      : []
   }
   if (record.type === 'assistant') {
-    const message = record.message as { content?: Array<{ type?: string; text?: string; name?: string }> } | undefined
+    const message = record.message as
+      | { content?: Array<{ type?: string; text?: string; name?: string }> }
+      | undefined
     const events: AgentRunEvent[] = []
     for (const block of message?.content ?? []) {
-      if (block.type === 'text' && typeof block.text === 'string') events.push({ type: 'text', value: block.text })
-      if (block.type === 'tool_use' && typeof block.name === 'string') events.push({ type: 'tool', name: block.name })
+      if (block.type === 'text' && typeof block.text === 'string')
+        events.push({ type: 'text', value: block.text })
+      if (block.type === 'tool_use' && typeof block.name === 'string')
+        events.push({ type: 'tool', name: block.name })
     }
     return events
   }

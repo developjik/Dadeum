@@ -1,11 +1,18 @@
 import { describe, expect, it } from 'vitest'
-import { decodeCredentials, decryptToken, encodeCredentials, encryptToken, type Encryptor } from './credentialCodec'
+import {
+  decodeCredentials,
+  decryptToken,
+  type Encryptor,
+  encodeCredentials,
+  encryptToken,
+} from './credentialCodec'
 
 /** 테스트용 대칭 암호기(실제 safeStorage는 main에서 주입). */
 const fakeEncryptor: Encryptor = {
   isEncryptionAvailable: () => true,
   encrypt: (plaintext) => Buffer.from(`enc:${plaintext.split('').reverse().join('')}`),
-  decrypt: (ciphertext) => ciphertext.toString('utf8').replace(/^enc:/, '').split('').reverse().join('')
+  decrypt: (ciphertext) =>
+    ciphertext.toString('utf8').replace(/^enc:/, '').split('').reverse().join(''),
 }
 
 describe('자격증명 코덱', () => {
@@ -15,7 +22,7 @@ describe('자격증명 코덱', () => {
       baseUrl: 'https://acme.atlassian.net',
       email: 'dev@acme.io',
       tokenCiphertextBase64: ciphertext,
-      savedAt: '2026-09-12T00:00:00.000Z'
+      savedAt: '2026-09-12T00:00:00.000Z',
     }
     const round = JSON.parse(encodeCredentials(stored)) as typeof stored
     expect(decryptToken(fakeEncryptor, round.tokenCiphertextBase64)).toBe('ATATT-secret-token')
@@ -27,7 +34,7 @@ describe('자격증명 코덱', () => {
       baseUrl: 'https://acme.atlassian.net',
       email: 'dev@acme.io',
       tokenCiphertextBase64: ciphertext,
-      savedAt: '2026-09-12T00:00:00.000Z'
+      savedAt: '2026-09-12T00:00:00.000Z',
     })
     expect(raw).not.toContain('PLAINTEXT-TOKEN-VALUE')
   })

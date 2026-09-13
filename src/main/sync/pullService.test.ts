@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, existsSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -10,13 +10,13 @@ import { pullFullSpace } from './pullService'
 function jsonResponse(init: { status?: number; body?: unknown }): Response {
   return new Response(init.body === undefined ? undefined : JSON.stringify(init.body), {
     status: init.status ?? 200,
-    headers: { 'Content-Type': 'application/json' }
+    headers: { 'Content-Type': 'application/json' },
   })
 }
 
 function fakeClient(): ConfluenceClient {
   const attachments = [
-    { id: 'att-1', title: 'logo.png', metadata: { mediaType: { name: 'image/png' } } }
+    { id: 'att-1', title: 'logo.png', metadata: { mediaType: { name: 'image/png' } } },
   ]
   return new ConfluenceClient({
     baseUrl: 'https://acme.atlassian.net',
@@ -31,20 +31,41 @@ function fakeClient(): ConfluenceClient {
             results: [
               { id: '990001', title: '루트 페이지', version: { number: 3 }, parentId: null },
               { id: '990002', title: '하위 페이지', version: { number: 1 }, parentId: '990001' },
-              { id: '990003', title: '루트 페이지', version: { number: 2 }, parentId: null } // 제목 충돌(F1)
+              { id: '990003', title: '루트 페이지', version: { number: 2 }, parentId: null }, // 제목 충돌(F1)
             ],
-            _links: {}
-          }
+            _links: {},
+          },
         })
       }
       if (url.includes('/api/v2/pages/990001')) {
-        return jsonResponse({ body: { id: '990001', title: '루트 페이지', version: { number: 3 }, body: { storage: { value: '<h1>루트</h1><p>내용</p>' } } } })
+        return jsonResponse({
+          body: {
+            id: '990001',
+            title: '루트 페이지',
+            version: { number: 3 },
+            body: { storage: { value: '<h1>루트</h1><p>내용</p>' } },
+          },
+        })
       }
       if (url.includes('/api/v2/pages/990002')) {
-        return jsonResponse({ body: { id: '990002', title: '하위 페이지', version: { number: 1 }, body: { storage: { value: '<p>하위 본문</p>' } } } })
+        return jsonResponse({
+          body: {
+            id: '990002',
+            title: '하위 페이지',
+            version: { number: 1 },
+            body: { storage: { value: '<p>하위 본문</p>' } },
+          },
+        })
       }
       if (url.includes('/api/v2/pages/990003')) {
-        return jsonResponse({ body: { id: '990003', title: '루트 페이지', version: { number: 2 }, body: { storage: { value: '<p>두 번째 루트</p>' } } } })
+        return jsonResponse({
+          body: {
+            id: '990003',
+            title: '루트 페이지',
+            version: { number: 2 },
+            body: { storage: { value: '<p>두 번째 루트</p>' } },
+          },
+        })
       }
       if (url.includes('/content/990001/child/attachment?')) {
         return jsonResponse({ body: { results: attachments } })
@@ -56,7 +77,7 @@ function fakeClient(): ConfluenceClient {
         return new Response(Buffer.from('PNG-DATA'), { status: 200 })
       }
       return jsonResponse({ status: 404, body: {} })
-    }) as unknown as typeof fetch
+    }) as unknown as typeof fetch,
   })
 }
 
@@ -70,7 +91,7 @@ describe('pullFullSpace(연결 시 전체 pull, ef-13)', () => {
       client: fakeClient(),
       space: { id: 'sp-1', key: 'DEV', name: '개발' },
       workspaceRoot: root,
-      db
+      db,
     })
 
     expect(result.pages).toBe(3)

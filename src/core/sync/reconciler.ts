@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
-import type { SyncStateDb, PageRecord } from '../store/syncState'
 import { fileHashOf } from '../store/hash'
+import type { PageRecord, SyncStateDb } from '../store/syncState'
 
 /**
  * 페이지 id 대차(reconciliation — 계획 §8.1, F-3/F-4/F2):
@@ -26,7 +26,9 @@ export function reconcilePageIds(options: {
   const remote = new Set(remotePageIds)
   const result: ReconciliationResult = { tombstoned: [], conflictCandidates: [] }
 
-  const localPages: PageRecord[] = db.listPagesBySpace(spaceKey).filter((page) => !page.remoteDeleted)
+  const localPages: PageRecord[] = db
+    .listPagesBySpace(spaceKey)
+    .filter((page) => !page.remoteDeleted)
   for (const page of localPages) {
     if (remote.has(page.pageId)) continue
 

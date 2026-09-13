@@ -17,11 +17,7 @@ export function contentHash(serializedXml: string): string {
 }
 
 export function carrierFence(name: string, hashId: string, serializedXml: string): string {
-  return [
-    '```' + `${CARRIER_LANG} name=${name} id=${hashId}`,
-    serializedXml,
-    '```'
-  ].join('\n')
+  return [`\`\`\`${CARRIER_LANG} name=${name} id=${hashId}`, serializedXml, '```'].join('\n')
 }
 
 export function inlineRefToken(hashId: string): string {
@@ -32,24 +28,6 @@ export interface ParsedCarrier {
   name: string
   id: string
   content: string
-}
-
-/** info string 파싱: `confluence-storage name=jira id=3f9c21ab` */
-export function parseCarrierInfoString(info: string): ParsedCarrier | null {
-  const tokens = info.trim().split(/\s+/)
-  if (tokens[0] !== CARRIER_LANG) return null
-  let name: string | undefined
-  let id: string | undefined
-  for (const token of tokens.slice(1)) {
-    const eq = token.indexOf('=')
-    if (eq === -1) continue
-    const key = token.slice(0, eq)
-    const value = token.slice(eq + 1)
-    if (key === 'name') name = value
-    if (key === 'id') id = value
-  }
-  if (!name || !id) return null
-  return { name, id, content: '' }
 }
 
 /** 펜스 내용의 해시가 info string의 id와 일치하는지 검증(무결성). */

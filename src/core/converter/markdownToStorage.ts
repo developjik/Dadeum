@@ -1,9 +1,9 @@
-import remarkParse from 'remark-parse'
-import remarkGfm from 'remark-gfm'
-import { unified } from 'unified'
 import type { List, PhrasingContent, Root, RootContent } from 'mdast'
-import { escapeStorageAttr, escapeStorageText } from './xml'
+import remarkGfm from 'remark-gfm'
+import remarkParse from 'remark-parse'
+import { unified } from 'unified'
 import { CARRIER_LANG, INLINE_REF_PREFIX, INLINE_REF_SUFFIX } from './carriers'
+import { escapeStorageAttr, escapeStorageText } from './xml'
 
 interface CarrierRegistry {
   carriers: Map<string, { name: string; content: string }>
@@ -49,7 +49,12 @@ export function markdownToStorage(markdown: string): string {
 }
 
 function carrierMeta(meta: string | null | undefined): Map<string, string> {
-  return new Map((meta ?? '').split(/\s+/).filter((t) => t.includes('=')).map((t) => [t.slice(0, t.indexOf('=')), t.slice(t.indexOf('=') + 1)]))
+  return new Map(
+    (meta ?? '')
+      .split(/\s+/)
+      .filter((t) => t.includes('='))
+      .map((t) => [t.slice(0, t.indexOf('=')), t.slice(t.indexOf('=') + 1)]),
+  )
 }
 
 function carrierId(meta: string | null | undefined): string | undefined {
@@ -80,10 +85,13 @@ function convertRootContent(node: RootContent, ctx: CarrierRegistry): string {
     case 'table': {
       const [header, ...body] = node.children
       const headerCells =
-        header?.children.map((cell) => `<th>${convertPhrasing(cell.children, ctx)}</th>`).join('') ?? ''
+        header?.children
+          .map((cell) => `<th>${convertPhrasing(cell.children, ctx)}</th>`)
+          .join('') ?? ''
       const bodyRows = body
         .map(
-          (row) => `<tr>${row.children.map((cell) => `<td>${convertPhrasing(cell.children, ctx)}</td>`).join('')}</tr>`
+          (row) =>
+            `<tr>${row.children.map((cell) => `<td>${convertPhrasing(cell.children, ctx)}</td>`).join('')}</tr>`,
         )
         .join('')
       return `<table><tbody><tr>${headerCells}</tr>${bodyRows}</tbody></table>`
@@ -114,7 +122,11 @@ function convertList(node: List, ctx: CarrierRegistry): string {
         if (child.type === 'list') nested.push(convertList(child, ctx))
         else direct.push(convertRootContent(child, ctx))
       }
-      const inner = direct.join('').replace(/^<p>/, '').replace(/<\/p>$/, '') + nested.join('')
+      const inner =
+        direct
+          .join('')
+          .replace(/^<p>/, '')
+          .replace(/<\/p>$/, '') + nested.join('')
       return `<li>${inner}</li>`
     })
     .join('')

@@ -14,6 +14,6 @@ export function buildCsp(): string {
     "object-src 'none'",
     "frame-src 'none'",
     "base-uri 'none'",
-    "form-action 'none'"
+    "form-action 'none'",
   ].join('; ')
 }

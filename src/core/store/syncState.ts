@@ -106,12 +106,12 @@ export class SyncStateDb {
   }): void {
     this.db
       .prepare(
-        `INSERT INTO pages (page_id, space_key, path, title, version, content_hash, updated_at, synced_at, remote_deleted)
-         VALUES (@pageId, @spaceKey, @path, @title, @version, @contentHash, @updatedAt, @syncedAt, @remoteDeleted)
+        `INSERT INTO pages (page_id, space_key, path, title, version, parent_id, content_hash, updated_at, synced_at, remote_deleted)
+         VALUES (@pageId, @spaceKey, @path, @title, @version, @parentId, @contentHash, @updatedAt, @syncedAt, @remoteDeleted)
          ON CONFLICT(page_id) DO UPDATE SET
-           space_key=@spaceKey, path=@path, title=@title, version=@version,
+           space_key=@spaceKey, path=@path, title=@title, version=@version, parent_id=@parentId,
            content_hash=@contentHash, updated_at=@updatedAt, synced_at=@syncedAt,
-           remote_deleted=@remoteDeleted`
+           remote_deleted=@remoteDeleted`,
       )
       .run({
         pageId: page.pageId,
@@ -123,7 +123,7 @@ export class SyncStateDb {
         contentHash: page.contentHash,
         updatedAt: page.updatedAt,
         syncedAt: page.syncedAt ?? new Date().toISOString(),
-        remoteDeleted: page.remoteDeleted ? 1 : 0
+        remoteDeleted: page.remoteDeleted ? 1 : 0,
       })
   }
 
@@ -148,6 +148,28 @@ export class SyncStateDb {
     return rows.map((row) => this.toPage(row))
   }
 
+  /** 워크스페이스에 기록된 스페이스 키 목록(재시작 시 자동 폴링 복원용). */
+  listSpaceKeys(): string[] {
+    const rows = this.db
+      .prepare('SELECT DISTINCT space_key FROM pages ORDER BY space_key')
+      .all() as Array<{ space_key: string }>
+    return rows.map((row) => row.space_key)
+  }
+
+  /** 스페이스의 마지막 동기화 시각(최대 synced_at) — 증분 폴링 기준점으로 사용. */
+  lastSyncedAt(spaceKey: string): string | null {
+    const row = this.db
+      .prepare('SELECT MAX(synced_at) AS last FROM pages WHERE space_key = ?')
+      .get(spaceKey) as { last?: string | null }
+    return row.last ?? null
+  }
+
+  deleteAttachment(pageId: string, fileName: string): void {
+    this.db
+      .prepare('DELETE FROM attachments WHERE page_id = ? AND file_name = ?')
+      .run(pageId, fileName)
+  }
+
   markRemoteDeleted(pageId: string): void {
     this.db.prepare('UPDATE pages SET remote_deleted = 1 WHERE page_id = ?').run(pageId)
   }
@@ -157,11 +179,9 @@ export class SyncStateDb {
   }
 
   updateContentHash(pageId: string, contentHash: string | null): void {
-    this.db.prepare('UPDATE pages SET content_hash = ?, synced_at = ? WHERE page_id = ?').run(
-      contentHash,
-      new Date().toISOString(),
-      pageId
-    )
+    this.db
+      .prepare('UPDATE pages SET content_hash = ?, synced_at = ? WHERE page_id = ?')
+      .run(contentHash, new Date().toISOString(), pageId)
   }
 
   upsertAttachment(attachment: Omit<AttachmentRecord, 'syncedAt'> & { syncedAt?: string }): void {
@@ -170,19 +190,21 @@ export class SyncStateDb {
         `INSERT INTO attachments (page_id, file_name, media_type, file_hash, synced_at)
          VALUES (@pageId, @fileName, @mediaType, @fileHash, @syncedAt)
          ON CONFLICT(page_id, file_name) DO UPDATE SET
-           media_type=@mediaType, file_hash=@fileHash, synced_at=@syncedAt`
+           media_type=@mediaType, file_hash=@fileHash, synced_at=@syncedAt`,
       )
       .run({
         pageId: attachment.pageId,
         fileName: attachment.fileName,
         mediaType: attachment.mediaType,
         fileHash: attachment.fileHash,
-        syncedAt: attachment.syncedAt ?? new Date().toISOString()
+        syncedAt: attachment.syncedAt ?? new Date().toISOString(),
       })
   }
 
   listAttachmentsByPage(pageId: string): AttachmentRecord[] {
-    const rows = this.db.prepare('SELECT * FROM attachments WHERE page_id = ?').all(pageId) as Array<{
+    const rows = this.db
+      .prepare('SELECT * FROM attachments WHERE page_id = ?')
+      .all(pageId) as Array<{
       page_id: string
       file_name: string
       media_type: string | null
@@ -194,22 +216,29 @@ export class SyncStateDb {
       fileName: row.file_name,
       mediaType: row.media_type,
       fileHash: row.file_hash,
-      syncedAt: row.synced_at
+      syncedAt: row.synced_at,
     }))
   }
 
-  recordPendingCreate(spaceKey: string, parentId: string | null, localPath: string, title: string): number {
+  recordPendingCreate(
+    spaceKey: string,
+    parentId: string | null,
+    localPath: string,
+    title: string,
+  ): number {
     const result = this.db
       .prepare(
         `INSERT INTO pending_creates (space_key, parent_id, local_path, title, created_at)
-         VALUES (?, ?, ?, ?, ?)`
+         VALUES (?, ?, ?, ?, ?)`,
       )
       .run(spaceKey, parentId, localPath, title, new Date().toISOString())
     return Number(result.lastInsertRowid)
   }
 
   confirmPendingCreate(journalId: number, pageId: string): void {
-    this.db.prepare('UPDATE pending_creates SET confirmed_page_id = ? WHERE journal_id = ?').run(pageId, journalId)
+    this.db
+      .prepare('UPDATE pending_creates SET confirmed_page_id = ? WHERE journal_id = ?')
+      .run(pageId, journalId)
   }
 
   listUnconfirmedCreates(): PendingCreateRecord[] {
@@ -220,9 +249,9 @@ export class SyncStateDb {
 
   /** ChatSession(스페이스 스코프) ↔ 에이전트 세션 id 1:1 매핑(계획 §8.5). */
   getAgentSessionId(spaceKey: string): string | null {
-    const row = this.db.prepare('SELECT agent_session_id FROM chat_sessions WHERE space_key = ?').get(spaceKey) as
-      | { agent_session_id?: string }
-      | undefined
+    const row = this.db
+      .prepare('SELECT agent_session_id FROM chat_sessions WHERE space_key = ?')
+      .get(spaceKey) as { agent_session_id?: string } | undefined
     return row?.agent_session_id ?? null
   }
 
@@ -230,7 +259,7 @@ export class SyncStateDb {
     this.db
       .prepare(
         `INSERT INTO chat_sessions (space_key, agent_session_id, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT(space_key) DO UPDATE SET agent_session_id=@agent_session_id, updated_at=@updated_at`
+         ON CONFLICT(space_key) DO UPDATE SET agent_session_id=@agent_session_id, updated_at=@updated_at`,
       )
       .run(spaceKey, agentSessionId, new Date().toISOString())
   }
@@ -257,7 +286,7 @@ export class SyncStateDb {
       contentHash: row.content_hash,
       updatedAt: row.updated_at,
       syncedAt: row.synced_at,
-      remoteDeleted: row.remote_deleted === 1
+      remoteDeleted: row.remote_deleted === 1,
     }
   }
 }

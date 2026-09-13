@@ -14,7 +14,11 @@ export interface PageTreeNode {
  * 플랫 페이지 레코드를 parentId 기준 트리로 조립한다(§7 — 계층 = Confluence 페이지 트리).
  * 부모가 없는 페이지·순환은 루트로 강등해 유실 없이 표시한다.
  */
-export function buildPageTree(pages: Array<Pick<PageRecord, 'pageId' | 'title' | 'path' | 'version' | 'parentId' | 'remoteDeleted'>>): PageTreeNode[] {
+export function buildPageTree(
+  pages: Array<
+    Pick<PageRecord, 'pageId' | 'title' | 'path' | 'version' | 'parentId' | 'remoteDeleted'>
+  >,
+): PageTreeNode[] {
   type Work = PageTreeNode & { parentId: string | null }
   const nodes = new Map<string, Work>()
   for (const page of pages) {
@@ -25,7 +29,7 @@ export function buildPageTree(pages: Array<Pick<PageRecord, 'pageId' | 'title' |
       version: page.version,
       parentId: page.parentId,
       remoteDeleted: page.remoteDeleted,
-      children: []
+      children: [],
     })
   }
 

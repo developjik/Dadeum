@@ -1,6 +1,12 @@
 import { EventEmitter } from 'node:events'
 import { describe, expect, it, vi } from 'vitest'
-import { ClaudeCodeAdapter, augmentedGuiPath, buildClaudeArgs, resolveClaudeCommand, type AgentProcess } from './claudeCodeAdapter'
+import {
+  type AgentProcess,
+  augmentedGuiPath,
+  buildClaudeArgs,
+  ClaudeCodeAdapter,
+  resolveClaudeCommand,
+} from './claudeCodeAdapter'
 import { parseStreamJsonLine, parseStreamJsonLines } from './streamJson'
 
 interface FakeProcess extends AgentProcess {
@@ -36,7 +42,7 @@ function fakeProcess(): FakeProcess {
     },
     emitClose(code: number | null) {
       emitter.emit('close', code)
-    }
+    },
   }
   return proc as FakeProcess
 }
@@ -52,7 +58,7 @@ describe('buildClaudeArgs', () => {
       '--permission-mode',
       'acceptEdits',
       '--allowedTools',
-      'Read,Edit,Write,Glob,Grep'
+      'Read,Edit,Write,Glob,Grep',
     ])
   })
 
@@ -65,9 +71,11 @@ describe('buildClaudeArgs', () => {
 
 describe('resolveClaudeCommand / augmentedGuiPath', () => {
   it('존재하는 후보 경로를 반환한다', () => {
-    expect(resolveClaudeCommand(['/opt/homebrew/bin/claude', '/usr/local/bin/claude'], (p) => p.includes('homebrew'))).toBe(
-      '/opt/homebrew/bin/claude'
-    )
+    expect(
+      resolveClaudeCommand(['/opt/homebrew/bin/claude', '/usr/local/bin/claude'], (p) =>
+        p.includes('homebrew'),
+      ),
+    ).toBe('/opt/homebrew/bin/claude')
   })
 
   it('후보가 없으면 PATH 위임(claude)으로 폴백한다', () => {
@@ -92,11 +100,11 @@ describe('parseStreamJsonLine', () => {
       '{"type":"assistant","message":{"content":[{"type":"text","text":"수정 중"}]}}',
       '{"type":"assistant","message":{"content":[{"type":"tool_use","name":"Edit"}]}}',
       '부분 출력(무시)',
-      ''
+      '',
     ])
     expect(events).toEqual([
       { type: 'text', value: '수정 중' },
-      { type: 'tool', name: 'Edit' }
+      { type: 'tool', name: 'Edit' },
     ])
   })
 })
@@ -109,7 +117,7 @@ describe('ClaudeCodeAdapter 계약', () => {
       spawnImpl: (command, args, options) => {
         captured = { command, args, options }
         return proc
-      }
+      },
     })
 
     const events: string[] = []
@@ -133,7 +141,7 @@ describe('ClaudeCodeAdapter 계약', () => {
       write: (chunk: string) => {
         stdinWritten = chunk
       },
-      end: () => undefined
+      end: () => undefined,
     }
     const adapter = new ClaudeCodeAdapter({ spawnImpl: () => proc })
     const handle = adapter.start({ prompt: 'stdin 프롬프트', cwd: '/ws' })

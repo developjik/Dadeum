@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { storageToMarkdown } from './storageToMarkdown'
-import { markdownToStorage } from './markdownToStorage'
-import { storageSemanticallyEqual } from './compare'
 import { verifyCarrierIntegrity } from './carriers'
+import { storageSemanticallyEqual } from './compare'
+import { markdownToStorage } from './markdownToStorage'
+import { storageToMarkdown } from './storageToMarkdown'
 
 /** AC-5 게이트: storage → md → storage가 의미적으로 동일해야 한다. */
 function expectRoundTripLossless(storage: string): string {
@@ -25,7 +25,7 @@ describe('storageToMarkdown', () => {
 
   it('강조·이탤릭·링크를 변환한다', () => {
     const { markdown } = storageToMarkdown(
-      '<p><strong>굵게</strong>와 <em>기울임</em>, <a href="https://example.com">링크</a></p>'
+      '<p><strong>굵게</strong>와 <em>기울임</em>, <a href="https://example.com">링크</a></p>',
     )
     expect(markdown).toContain('**굵게**')
     expect(markdown).toContain('*기울임*')
@@ -33,16 +33,22 @@ describe('storageToMarkdown', () => {
   })
 
   it('매크로 블록을 펜스드 캐리어로 보존한다', () => {
-    const macro = '<ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">ABC-1</ac:parameter></ac:structured-macro>'
+    const macro =
+      '<ac:structured-macro ac:name="jira"><ac:parameter ac:name="key">ABC-1</ac:parameter></ac:structured-macro>'
     const { markdown } = storageToMarkdown(`<p>앞 문단</p>${macro}<p>뒤 문단</p>`)
 
     expect(markdown).toContain('```confluence-storage name=structured-macro id=')
     expect(markdown).toContain('<ac:parameter ac:name="key">ABC-1</ac:parameter>')
     // 캐리어 본문 해시가 info string의 id와 일치한다(무결성).
     const fenceContent = markdown.split('```confluence-storage')[1]
-    const content = fenceContent.slice(fenceContent.indexOf('\n') + 1, fenceContent.lastIndexOf('```'))
+    const content = fenceContent.slice(
+      fenceContent.indexOf('\n') + 1,
+      fenceContent.lastIndexOf('```'),
+    )
     const id = /id=([0-9a-f]+)/.exec(markdown)![1]
-    expect(verifyCarrierIntegrity({ name: 'structured-macro', id, content: content.replace(/\n$/, '') })).toBe(true)
+    expect(
+      verifyCarrierIntegrity({ name: 'structured-macro', id, content: content.replace(/\n$/, '') }),
+    ).toBe(true)
   })
 
   it('인라인 승격 조각은 ref 토큰과 문서 끝 캐리어 구역을 만든다', () => {
@@ -71,8 +77,11 @@ describe('markdownToStorage', () => {
   })
 
   it('캐리어 펜스를 verbatim으로 재주입한다', () => {
-    const macro = '<ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Green</ac:parameter></ac:structured-macro>'
-    const storage = markdownToStorage('```confluence-storage name=structured-macro id=deadbeef\n' + macro + '\n```')
+    const macro =
+      '<ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Green</ac:parameter></ac:structured-macro>'
+    const storage = markdownToStorage(
+      `\`\`\`confluence-storage name=structured-macro id=deadbeef\n${macro}\n\`\`\``,
+    )
     expect(storage).toContain('<ac:parameter ac:name="colour">Green</ac:parameter>')
   })
 })
@@ -83,11 +92,17 @@ describe('AC-5 왕복 무손실(픽스처 게이트)', () => {
     ['엔티티', '<p>a &nbsp; b &amp; c</p>'],
     ['제목·목록', '<h1>제목</h1><ul><li>항목1</li><li>항목2<ul><li>중첩</li></ul></li></ul>'],
     ['순서 목록', '<ol><li>첫째</li><li>둘째</li></ol>'],
-    ['표', '<table><tbody><tr><th>이름</th><th>값</th></tr><tr><td>a</td><td>1</td></tr></tbody></table>'],
+    [
+      '표',
+      '<table><tbody><tr><th>이름</th><th>값</th></tr><tr><td>a</td><td>1</td></tr></tbody></table>',
+    ],
     ['강조 조합', '<p><strong>굵음</strong><em>기울임</em><code>code</code></p>'],
-    ['매크로 블록', '<p>앞</p><ac:structured-macro ac:name="info"><ac:parameter ac:name="title">공지</ac:parameter><ac:rich-text-body><p>내용</p></ac:rich-text-body></ac:structured-macro><p>뒤</p>'],
+    [
+      '매크로 블록',
+      '<p>앞</p><ac:structured-macro ac:name="info"><ac:parameter ac:name="title">공지</ac:parameter><ac:rich-text-body><p>내용</p></ac:rich-text-body></ac:structured-macro><p>뒤</p>',
+    ],
     ['인라인 승격', '<p>참조 <ac:link><ri:page ri:content-title="문서" /></ac:link> 포함</p>'],
-    ['인용·수평선', '<blockquote><p>인용</p></blockquote><hr/><p>끝</p>']
+    ['인용·수평선', '<blockquote><p>인용</p></blockquote><hr/><p>끝</p>'],
   ])('%s 픽스처가 무손실로 왕복한다', (_name, storage) => {
     expectRoundTripLossless(storage)
   })
@@ -97,7 +112,7 @@ describe('AC-5 왕복 무손실(픽스처 게이트)', () => {
       '<h1>배포 가이드</h1>',
       '<p>요약: <strong>v2</strong> 배포 절차 — <ac:link><ri:page ri:content-title="롤백" /></ac:link></p>',
       '<table><tbody><tr><th>단계</th><th>담당</th></tr><tr><td>빌드</td><td>CI</td></tr></tbody></table>',
-      '<ac:structured-macro ac:name="expand"><ac:parameter ac:name="title">상세</ac:parameter><ac:rich-text-body><ul><li>항목</li></ul></ac:rich-text-body></ac:structured-macro>'
+      '<ac:structured-macro ac:name="expand"><ac:parameter ac:name="title">상세</ac:parameter><ac:rich-text-body><ul><li>항목</li></ul></ac:rich-text-body></ac:structured-macro>',
     ].join('')
     expectRoundTripLossless(storage)
   })
@@ -107,18 +122,20 @@ describe('왕복 하드닝(M8 확대 픽스처)', () => {
   it('rich-text-body에 표를 포함한 매크로가 무손실로 왕복한다', () => {
     const storage = [
       '<ac:structured-macro ac:name="expand"><ac:parameter ac:name="title">상세</ac:parameter>',
-      '<ac:rich-text-body><table><tbody><tr><th>항목</th></tr><tr><td>값 &amp; 단위</td></tr></tbody></table></ac:rich-text-body></ac:structured-macro>'
+      '<ac:rich-text-body><table><tbody><tr><th>항목</th></tr><tr><td>값 &amp; 단위</td></tr></tbody></table></ac:rich-text-body></ac:structured-macro>',
     ].join('')
     expectRoundTripLossless(storage)
   })
 
   it('특수문자가 포함된 코드 블록이 무손실로 왕복한다', () => {
-    const storage = '<ac:structured-macro ac:name="code"><ac:plain-text-body><![CDATA[const x = {a: 1 < 2, b: \'z\'}]]></ac:plain-text-body></ac:structured-macro>'
+    const storage =
+      '<ac:structured-macro ac:name="code"><ac:plain-text-body><![CDATA[const x = {a: 1 < 2, b: \'z\'}]]></ac:plain-text-body></ac:structured-macro>'
     expectRoundTripLossless(storage)
   })
 
   it('중첩 목록+강조 조합이 무손실로 왕복한다', () => {
-    const storage = '<ul><li><strong>굵은</strong> 항목<ul><li><em>중첩 기울임</em></li></ul></li></ul>'
+    const storage =
+      '<ul><li><strong>굵은</strong> 항목<ul><li><em>중첩 기울임</em></li></ul></li></ul>'
     expectRoundTripLossless(storage)
   })
 })
@@ -126,7 +143,7 @@ describe('왕복 하드닝(M8 확대 픽스처)', () => {
 describe('멱등성(md → storage → md)', () => {
   it('마크다운을 한 번 역변환 후 다시 정방향 변환해도 동일하다', () => {
     const md1 = storageToMarkdown(
-      '<h2>헤더</h2><p>문단 — <em>강조</em></p><ac:structured-macro ac:name="toc" />'
+      '<h2>헤더</h2><p>문단 — <em>강조</em></p><ac:structured-macro ac:name="toc" />',
     ).markdown
     const storage = markdownToStorage(md1)
     const md2 = storageToMarkdown(storage).markdown

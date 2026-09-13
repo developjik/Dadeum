@@ -1,6 +1,6 @@
+import { createHash } from 'node:crypto'
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { createHash } from 'node:crypto'
 import { isSyncTarget } from '../store/workspace'
 
 /**
@@ -16,7 +16,8 @@ export interface ApprovalSnapshot {
 export function captureSnapshot(workspaceRoot: string, approvedPaths: string[]): ApprovalSnapshot {
   const entries = new Map<string, { hash: string }>()
   for (const relPath of approvedPaths) {
-    if (!isSyncTarget(relPath)) throw new Error(`동기 대상이 아닌 경로는 승인할 수 없습니다: ${relPath}`)
+    if (!isSyncTarget(relPath))
+      throw new Error(`동기 대상이 아닌 경로는 승인할 수 없습니다: ${relPath}`)
     const abs = join(workspaceRoot, relPath)
     const content = readFileSync(abs)
     entries.set(relPath, { hash: createHash('sha256').update(content).digest('hex') })
@@ -35,7 +36,7 @@ const defaultFs: FsAdapter = { existsSync, readFileSync }
 export function verifySnapshot(
   workspaceRoot: string,
   snapshot: ApprovalSnapshot,
-  fs: FsAdapter = defaultFs
+  fs: FsAdapter = defaultFs,
 ): { ok: boolean; mismatched: string[] } {
   const mismatched: string[] = []
   for (const [relPath, entry] of snapshot.entries) {

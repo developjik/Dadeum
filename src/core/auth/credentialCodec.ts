@@ -30,7 +30,10 @@ export function decodeCredentials(raw: string): StoredCredentials {
   if (typeof parsed.email !== 'string' || parsed.email.length === 0) {
     throw new Error('자격증명 파일에 email이 없습니다')
   }
-  if (typeof parsed.tokenCiphertextBase64 !== 'string' || parsed.tokenCiphertextBase64.length === 0) {
+  if (
+    typeof parsed.tokenCiphertextBase64 !== 'string' ||
+    parsed.tokenCiphertextBase64.length === 0
+  ) {
     throw new Error('자격증명 파일에 토큰 암호문이 없습니다')
   }
   if (typeof parsed.savedAt !== 'string') {

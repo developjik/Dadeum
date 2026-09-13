@@ -1,6 +1,10 @@
 node_modules/
 out/
 dist/
+coverage/
 *.log
 .DS_Store
 .gjc/
+# 로컬 동기화된 개인 Confluence 문서·QA 산출물 — 커밋 금지
+golden-pass-workspace/
+artifacts/

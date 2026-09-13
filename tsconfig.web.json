@@ -12,11 +12,8 @@
     "noEmit": true,
     "esModuleInterop": true,
     "isolatedModules": true,
-    "useDefineForClassFields": true
+    "useDefineForClassFields": true,
+    "noUncheckedSideEffectImports": false
   },
-  "include": [
-    "src/renderer/**/*",
-    "src/core/i18n/**/*",
-    "src/core/ipc/**/*"
-  ]
+  "include": ["src/renderer/**/*", "src/core/i18n/**/*", "src/core/ipc/**/*"]
 }

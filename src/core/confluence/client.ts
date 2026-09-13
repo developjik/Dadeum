@@ -1,6 +1,8 @@
 import { normalizeId } from './id'
 import { ConfluenceApiError, type ConfluenceSpace } from './types'
-export { ConfluenceApiError, ConfluenceSpace }
+
+export type { ConfluenceSpace }
+
 import type { Paginated } from './types'
 
 export interface ConfluenceClientOptions {
@@ -18,6 +20,8 @@ export interface ConfluenceClientOptions {
   pageSize?: number
   /** 페이지네이션 무한 루프 방어 상한 */
   maxPages?: number
+  /** 단일 HTTP 요청 타임아웃 ms(기본 30000 — hang 커넥션이 pull/push를 점유하는 것 방지) */
+  requestTimeoutMs?: number
 }
 
 export interface AuthIdentity {
@@ -28,7 +32,10 @@ export interface AuthIdentity {
 function normalizeBaseUrl(baseUrl: string): string {
   const trimmed = baseUrl.trim().replace(/\/+$/, '')
   if (!/^https:\/\/[a-z0-9.-]+$/i.test(trimmed)) {
-    throw new ConfluenceApiError('unexpected', `올바르지 않은 사이트 주소: ${baseUrl}(https://xxx.atlassian.net 형식)`)
+    throw new ConfluenceApiError(
+      'unexpected',
+      `올바르지 않은 사이트 주소: ${baseUrl}(https://xxx.atlassian.net 형식)`,
+    )
   }
   return trimmed
 }
@@ -49,7 +56,6 @@ export function parseRetryAfterMs(header: string | null | undefined): number | u
   return undefined
 }
 
-
 /** _links.next 정규화: 전체 URL이면 경로만 추출하고 /wiki 이중 접두사를 제거한다. */
 function normalizeCursorPath(next: string): string {
   let path = next.startsWith('http') ? new URL(next).pathname + new URL(next).search : next
@@ -65,6 +71,7 @@ export class ConfluenceClient {
   private readonly maxRetries: number
   private readonly pageSize: number
   private readonly maxPages: number
+  private readonly requestTimeoutMs: number
 
   constructor(options: ConfluenceClientOptions) {
     this.identity = { baseUrl: normalizeBaseUrl(options.baseUrl), email: options.email }
@@ -74,13 +81,28 @@ export class ConfluenceClient {
     this.maxRetries = options.maxRetries ?? 3
     this.pageSize = options.pageSize ?? 100
     this.maxPages = options.maxPages ?? 50
+    this.requestTimeoutMs = options.requestTimeoutMs ?? 30000
   }
 
-  private async requestJson<T>(path: string, init?: { method?: string; body?: string }): Promise<T> {
+  /** 타임아웃이 적용된 fetch — 네트워크 hang이 동기화 전체를 점유하지 않게 한다. */
+  private async fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), this.requestTimeoutMs)
+    try {
+      return await this.fetchImpl(url, { ...init, signal: controller.signal })
+    } finally {
+      clearTimeout(timer)
+    }
+  }
+
+  private async requestJson<T>(
+    path: string,
+    init?: { method?: string; body?: string },
+  ): Promise<T> {
     const url = `${this.identity.baseUrl}/wiki${path}`
     const headers: Record<string, string> = {
       Authorization: buildBasicAuthHeader(this.identity.email, this.token),
-      Accept: 'application/json'
+      Accept: 'application/json',
     }
     if (init?.body !== undefined) headers['Content-Type'] = 'application/json'
 
@@ -88,10 +110,16 @@ export class ConfluenceClient {
     for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
       let response: Response
       try {
-        response = await this.fetchImpl(url, { ...init, headers })
+        response = await this.fetchWithTimeout(url, { ...init, headers })
       } catch (cause) {
-        // 네트워크 계열 오류도 백오프 재시도 대상(DNS/일시적 단절).
-        lastError = new ConfluenceApiError('network', `네트워크 오류: ${String(cause)}`)
+        // 네트워크 계열 오류(타임아웃 abort 포함)도 백오프 재시도 대상(DNS/일시적 단절).
+        const aborted = cause instanceof Error && cause.name === 'AbortError'
+        lastError = new ConfluenceApiError(
+          'network',
+          aborted
+            ? `요청 시간 초과(${Math.round(this.requestTimeoutMs / 1000)}초): ${path}`
+            : `네트워크 오류: ${String(cause)}`,
+        )
         if (attempt < this.maxRetries) {
           await this.sleep(500 * 2 ** attempt)
           continue
@@ -100,8 +128,14 @@ export class ConfluenceClient {
       }
 
       if (response.status === 429) {
-        const retryAfterMs = parseRetryAfterMs(response.headers.get('Retry-After')) ?? 500 * 2 ** attempt
-        lastError = new ConfluenceApiError('rate_limited', 'Confluence 요청 한도 초과(429)', 429, retryAfterMs)
+        const retryAfterMs =
+          parseRetryAfterMs(response.headers.get('Retry-After')) ?? 500 * 2 ** attempt
+        lastError = new ConfluenceApiError(
+          'rate_limited',
+          'Confluence 요청 한도 초과(429)',
+          429,
+          retryAfterMs,
+        )
         if (attempt < this.maxRetries) {
           await this.sleep(retryAfterMs)
           continue
@@ -110,7 +144,11 @@ export class ConfluenceClient {
       }
 
       if (response.status === 401) {
-        throw new ConfluenceApiError('unauthorized', '이메일 또는 API 토큰이 올바르지 않습니다(401)', 401)
+        throw new ConfluenceApiError(
+          'unauthorized',
+          '이메일 또는 API 토큰이 올바르지 않습니다(401)',
+          401,
+        )
       }
       if (response.status === 403) {
         throw new ConfluenceApiError('forbidden', '접근이 거부되었습니다(403)', 403)
@@ -119,7 +157,11 @@ export class ConfluenceClient {
         throw new ConfluenceApiError('not_found', '대상을 찾을 수 없습니다(404)', 404)
       }
       if (response.status >= 500) {
-        lastError = new ConfluenceApiError('server', `Confluence 서버 오류(${response.status})`, response.status)
+        lastError = new ConfluenceApiError(
+          'server',
+          `Confluence 서버 오류(${response.status})`,
+          response.status,
+        )
         if (attempt < this.maxRetries) {
           await this.sleep(500 * 2 ** attempt)
           continue
@@ -131,7 +173,7 @@ export class ConfluenceClient {
         throw new ConfluenceApiError(
           'unexpected',
           `예상치 못한 응답(${response.status}): ${bodyText.slice(0, 300)}`,
-          response.status
+          response.status,
         )
       }
       return (await response.json()) as T
@@ -145,7 +187,7 @@ export class ConfluenceClient {
     const body = await this.requestJson<Paginated<ConfluenceSpace>>(path)
     return {
       results: body.results.map((space) => ({ ...space, id: normalizeId(space.id) })),
-      _links: body._links
+      _links: body._links,
     }
   }
 
@@ -160,7 +202,10 @@ export class ConfluenceClient {
       if (!next) return spaces
       cursorPath = normalizeCursorPath(next)
     }
-    throw new ConfluenceApiError('unexpected', `스페이스 페이지네이션이 ${this.maxPages}페이지를 초과했습니다`)
+    throw new ConfluenceApiError(
+      'unexpected',
+      `스페이스 페이지네이션이 ${this.maxPages}페이지를 초과했습니다`,
+    )
   }
 
   /** 연결 검증: 스페이스 1페이지만 조회해 자격증명과 사이트 접근성을 확인한다. */
@@ -170,9 +215,16 @@ export class ConfluenceClient {
   }
 
   /** 스페이스의 모든 페이지를 커서 순회로 수집한다(요약: id·title·version). */
-  async listAllPagesBySpace(spaceId: string): Promise<Array<{ id: string; title: string; version: number; parentId: string | null }>> {
+  async listAllPagesBySpace(
+    spaceId: string,
+  ): Promise<Array<{ id: string; title: string; version: number; parentId: string | null }>> {
     const pages: Array<{ id: string; title: string; version: number; parentId: string | null }> = []
-    type PageSummaryBody = Paginated<{ id: string | number; title: string; version?: { number?: number | string }; parentId?: string | number | null }>
+    type PageSummaryBody = Paginated<{
+      id: string | number
+      title: string
+      version?: { number?: number | string }
+      parentId?: string | number | null
+    }>
     let cursorPath: string | undefined = `/api/v2/spaces/${spaceId}/pages?limit=${this.pageSize}`
     for (let page = 0; page < this.maxPages; page++) {
       const path = cursorPath as string
@@ -182,18 +234,23 @@ export class ConfluenceClient {
           id: normalizeId(item.id),
           title: item.title,
           version: Number(item.version?.number ?? 0),
-          parentId: item.parentId == null ? null : normalizeId(item.parentId)
+          parentId: item.parentId == null ? null : normalizeId(item.parentId),
         })
       }
       const next = body._links?.next
       if (!next) return pages
       cursorPath = normalizeCursorPath(next)
     }
-    throw new ConfluenceApiError('unexpected', `페이지 페이지네이션이 ${this.maxPages}페이지를 초과했습니다`)
+    throw new ConfluenceApiError(
+      'unexpected',
+      `페이지 페이지네이션이 ${this.maxPages}페이지를 초과했습니다`,
+    )
   }
 
   /** 페이지 본문(storage format)과 버전을 조회한다. */
-  async getPageStorage(pageId: string): Promise<{ id: string; title: string; version: number; storageValue: string }> {
+  async getPageStorage(
+    pageId: string,
+  ): Promise<{ id: string; title: string; version: number; storageValue: string }> {
     const body = await this.requestJson<{
       id: string | number
       title: string
@@ -204,7 +261,7 @@ export class ConfluenceClient {
       id: normalizeId(body.id),
       title: body.title,
       version: Number(body.version?.number ?? 0),
-      storageValue: body.body?.storage?.value ?? ''
+      storageValue: body.body?.storage?.value ?? '',
     }
   }
 
@@ -212,16 +269,24 @@ export class ConfluenceClient {
    * 첨부 목록. v1 REST가 사이트에서 비활성화된 경우(404) v2 엔드포인트로 폴백한다.
    * downloadPath는 _links.download(상대 경로) — downloadAttachment에 그대로 전달.
    */
-  async listAttachments(pageId: string): Promise<Array<{ id: string; fileName: string; mediaType: string | null; downloadPath: string | null }>> {
+  async listAttachments(
+    pageId: string,
+  ): Promise<
+    Array<{ id: string; fileName: string; mediaType: string | null; downloadPath: string | null }>
+  > {
     try {
       const body = await this.requestJson<{
-        results?: Array<{ id: string | number; title: string; metadata?: { mediaType?: { name?: string } } }>
+        results?: Array<{
+          id: string | number
+          title: string
+          metadata?: { mediaType?: { name?: string } }
+        }>
       }>(`/rest/api/content/${pageId}/child/attachment?limit=${this.pageSize}`)
       return (body.results ?? []).map((item) => ({
         id: normalizeId(item.id),
         fileName: item.title,
         mediaType: item.metadata?.mediaType?.name ?? null,
-        downloadPath: `/wiki/rest/api/content/${pageId}/child/attachment/${normalizeId(item.id)}/download`
+        downloadPath: `/wiki/rest/api/content/${pageId}/child/attachment/${normalizeId(item.id)}/download`,
       }))
     } catch (cause) {
       if (!(cause instanceof ConfluenceApiError) || cause.status !== 404) throw cause
@@ -238,11 +303,10 @@ export class ConfluenceClient {
         id: normalizeId(item.id),
         fileName: item.title ?? item.fileId ?? 'attachment',
         mediaType: item.mediaType ?? null,
-        downloadPath: item._links?.download ?? null
+        downloadPath: item._links?.download ?? null,
       }))
     }
   }
-
 
   /** 페이지 생성(v2, AC-9). 응답 id·version을 문자열/숫자로 정규화해 반환. */
   async createPage(request: {
@@ -255,75 +319,123 @@ export class ConfluenceClient {
       spaceId: request.spaceId,
       status: 'current',
       title: request.title,
-      body: { representation: 'storage', value: request.storageValue }
+      body: { representation: 'storage', value: request.storageValue },
     }
     if (request.parentId) payload.parentId = request.parentId
-    const body = await this.requestJson<{ id: string | number; title: string; version?: { number?: number | string }; parent_id?: string | number }>(
-      '/api/v2/pages',
-      { method: 'POST', body: JSON.stringify(payload) }
-    )
+    const body = await this.requestJson<{
+      id: string | number
+      title: string
+      version?: { number?: number | string }
+      parent_id?: string | number
+    }>('/api/v2/pages', { method: 'POST', body: JSON.stringify(payload) })
     return {
       pageId: normalizeId(body.id),
       title: body.title,
       version: Number(body.version?.number ?? 1),
-      parentId: body.parent_id == null ? null : normalizeId(body.parent_id)
+      parentId: body.parent_id == null ? null : normalizeId(body.parent_id),
     }
   }
 
-  /** 페이지 수정(v2 — 요청 버전 명시, 충돌 시 Confluence가 거부). */
+  /**
+   * 페이지 수정(v2 — 요청 버전 명시, 충돌 시 Confluence가 거부).
+   * parentId를 넘기면 페이지 이동(부모 변경)도 반영한다. 원격 루트로 이동은
+   * parentType 'space' + parentId = spaceId로 표현한다.
+   */
   async updatePage(request: {
     pageId: string
     currentVersion: number
     title: string
     storageValue: string
+    parentId?: string | null
+    parentType?: 'page' | 'space'
   }): Promise<{ pageId: string; title: string; version: number }> {
-    const body = await this.requestJson<{ id: string | number; title: string; version?: { number?: number | string } }>(
-      `/api/v2/pages/${request.pageId}`,
-      {
-        method: 'PUT',
-        body: JSON.stringify({
-          id: request.pageId,
-          status: 'current',
-          title: request.title,
-          body: { representation: 'storage', value: request.storageValue },
-          version: { number: request.currentVersion + 1 }
-        })
-      }
-    )
+    const payload: Record<string, unknown> = {
+      id: request.pageId,
+      status: 'current',
+      title: request.title,
+      body: { representation: 'storage', value: request.storageValue },
+      version: { number: request.currentVersion + 1 },
+    }
+    if (request.parentId !== undefined) {
+      payload.parentId = request.parentId
+      payload.parentType = request.parentType ?? 'page'
+    }
+    const body = await this.requestJson<{
+      id: string | number
+      title: string
+      version?: { number?: number | string }
+    }>(`/api/v2/pages/${request.pageId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    })
     return {
       pageId: normalizeId(body.id),
       title: body.title,
-      version: Number(body.version?.number ?? 0)
+      version: Number(body.version?.number ?? 0),
     }
   }
 
-
-  /** 증분 폴링용: 특정 시각 이후 수정된 페이지 id 목록(v1 CQL 검색). */
+  /**
+   * 증분 폴링용: 특정 시각 이후 수정된 페이지 id 목록(v1 CQL 검색, 커서 순회).
+   * 단일 페이지 조회로 두면 pageSize 초과 변경분이 누락되므로 _links.next를 순회한다.
+   */
   async listPageIdsModifiedSince(spaceKey: string, sinceIso: string): Promise<string[]> {
-    const cql = `type=page AND space="${spaceKey}" AND lastmodified > "${sinceIso}"`
-    const body = await this.requestJson<{
-      results?: Array<{ content?: { id?: string | number } }>
-    }>(`/rest/api/search?cql=${encodeURIComponent(cql)}&limit=${this.pageSize}`)
-    return (body.results ?? [])
-      .map((item) => item.content?.id)
-      .filter((id): id is string | number => id !== undefined)
-      .map((id) => normalizeId(id))
+    const escapedKey = spaceKey.replace(/"/g, '\\"')
+    const cql = `type=page AND space="${escapedKey}" AND lastmodified > "${sinceIso}"`
+    const ids: string[] = []
+    const seen = new Set<string>()
+    let cursorPath: string | undefined =
+      `/rest/api/search?cql=${encodeURIComponent(cql)}&limit=${this.pageSize}`
+    for (let page = 0; page < this.maxPages; page++) {
+      const body = await this.requestJson<{
+        results?: Array<{ content?: { id?: string | number } }>
+        _links?: { next?: string }
+      }>(cursorPath)
+      for (const item of body.results ?? []) {
+        const id = item.content?.id
+        if (id === undefined) continue
+        const normalized = normalizeId(id)
+        if (!seen.has(normalized)) {
+          seen.add(normalized)
+          ids.push(normalized)
+        }
+      }
+      const next = body._links?.next
+      if (!next) return ids
+      cursorPath = normalizeCursorPath(next)
+    }
+    throw new ConfluenceApiError(
+      'unexpected',
+      `증분 검색 페이지네이션이 ${this.maxPages}페이지를 초과했습니다`,
+    )
   }
 
   /** 첨부 업로드(v1 — 동명 재업로드 시 버전 갱신, X-Atlassian-Token 필수). */
-  async uploadAttachment(pageId: string, fileName: string, content: Buffer, mediaType: string): Promise<{ id: string }> {
+  async uploadAttachment(
+    pageId: string,
+    fileName: string,
+    content: Buffer,
+    mediaType: string,
+  ): Promise<{ id: string }> {
     const form = new FormData()
     form.append('file', new Blob([new Uint8Array(content)], { type: mediaType }), fileName)
-    const response = await this.fetchImpl(`${this.identity.baseUrl}/wiki/rest/api/content/${pageId}/child/attachment`, {
-      method: 'POST',
-      headers: {
-        Authorization: buildBasicAuthHeader(this.identity.email, this.token),
-        'X-Atlassian-Token': 'no-check'
+    const response = await this.fetchWithTimeout(
+      `${this.identity.baseUrl}/wiki/rest/api/content/${pageId}/child/attachment`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: buildBasicAuthHeader(this.identity.email, this.token),
+          'X-Atlassian-Token': 'no-check',
+        },
+        body: form,
       },
-      body: form
-    })
+    )
     if (!response.ok) {
-      throw new ConfluenceApiError('unexpected', `첨부 업로드 실패(${response.status})`, response.status)
+      throw new ConfluenceApiError(
+        'unexpected',
+        `첨부 업로드 실패(${response.status})`,
+        response.status,
+      )
     }
     const body = (await response.json()) as { results?: Array<{ id: string | number }> }
     const first = body.results?.[0]
@@ -337,10 +449,35 @@ export class ConfluenceClient {
       ? downloadPath
       : `${this.identity.baseUrl}${downloadPath.startsWith('/wiki') ? '' : '/wiki'}${downloadPath}`
     const headers = { Authorization: buildBasicAuthHeader(this.identity.email, this.token) }
-    const response = await this.fetchImpl(url, { headers })
+    const response = await this.fetchWithTimeout(url, { headers })
     if (!response.ok) {
-      throw new ConfluenceApiError('unexpected', `첨부 다운로드 실패(${response.status})`, response.status)
+      throw new ConfluenceApiError(
+        'unexpected',
+        `첨부 다운로드 실패(${response.status})`,
+        response.status,
+      )
     }
     return response.arrayBuffer()
+  }
+
+  /**
+   * 첨부 삭제(v1 — 첨부도 content이므로 content id로 삭제한다).
+   * 로컬에서 삭제된 첨부를 원격에서도 정리할 때 사용한다.
+   */
+  async deleteAttachment(attachmentId: string): Promise<void> {
+    const response = await this.fetchWithTimeout(
+      `${this.identity.baseUrl}/wiki/rest/api/content/${attachmentId}`,
+      {
+        method: 'DELETE',
+        headers: { Authorization: buildBasicAuthHeader(this.identity.email, this.token) },
+      },
+    )
+    if (!response.ok && response.status !== 404) {
+      throw new ConfluenceApiError(
+        'unexpected',
+        `첨부 삭제 실패(${response.status})`,
+        response.status,
+      )
+    }
   }
 }

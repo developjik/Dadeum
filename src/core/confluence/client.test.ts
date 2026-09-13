@@ -11,14 +11,14 @@ interface MockResponseInit {
 function jsonResponse(init: MockResponseInit): Response {
   return new Response(init.body === undefined ? undefined : JSON.stringify(init.body), {
     status: init.status,
-    headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) }
+    headers: { 'Content-Type': 'application/json', ...(init.headers ?? {}) },
   })
 }
 
 function spacesPage(ids: string[], next?: string) {
   return {
     results: ids.map((id) => ({ id, key: `K${id}`, name: `스페이스 ${id}` })),
-    _links: next ? { next } : {}
+    _links: next ? { next } : {},
   }
 }
 
@@ -30,7 +30,7 @@ describe('ConfluenceClient', () => {
       baseUrl: 'https://acme.atlassian.net/',
       email: 'a@b.c',
       apiToken: 't',
-      fetchImpl: async () => jsonResponse({ status: 200, body: spacesPage(['1']) })
+      fetchImpl: async () => jsonResponse({ status: 200, body: spacesPage(['1']) }),
     })
     expect(client.identity.baseUrl).toBe('https://acme.atlassian.net')
   })
@@ -41,8 +41,8 @@ describe('ConfluenceClient', () => {
         new ConfluenceClient({
           baseUrl: 'http://confluence.internal',
           email: 'a@b.c',
-          apiToken: 't'
-        })
+          apiToken: 't',
+        }),
     ).toThrow(/https/)
   })
 
@@ -51,11 +51,26 @@ describe('ConfluenceClient', () => {
     const fetchImpl = vi.fn(async (input: Request | string | URL) => {
       const url = String(input)
       requestedUrls.push(url)
-      if (url.endsWith('limit=2')) return jsonResponse({ status: 200, body: spacesPage(['1', '2'], '/wiki/api/v2/spaces?limit=2&cursor=abc') })
-      if (url.includes('cursor=abc')) return jsonResponse({ status: 200, body: spacesPage(['3'], '/wiki/api/v2/spaces?limit=2&cursor=def') })
+      if (url.endsWith('limit=2'))
+        return jsonResponse({
+          status: 200,
+          body: spacesPage(['1', '2'], '/wiki/api/v2/spaces?limit=2&cursor=abc'),
+        })
+      if (url.includes('cursor=abc'))
+        return jsonResponse({
+          status: 200,
+          body: spacesPage(['3'], '/wiki/api/v2/spaces?limit=2&cursor=def'),
+        })
       return jsonResponse({ status: 200, body: spacesPage(['4']) })
     })
-    const client = new ConfluenceClient({ baseUrl: 'https://acme.atlassian.net', email: 'a@b.c', apiToken: 't', fetchImpl, pageSize: 2, sleep: instantSleep })
+    const client = new ConfluenceClient({
+      baseUrl: 'https://acme.atlassian.net',
+      email: 'a@b.c',
+      apiToken: 't',
+      fetchImpl,
+      pageSize: 2,
+      sleep: instantSleep,
+    })
 
     const spaces = await client.listAllSpaces()
     expect(spaces.map((s) => s.id)).toEqual(['1', '2', '3', '4'])
@@ -65,9 +80,19 @@ describe('ConfluenceClient', () => {
 
   it('페이지네이션 무한 루프를 maxPages로 방어한다', async () => {
     const fetchImpl = vi.fn(async () =>
-      jsonResponse({ status: 200, body: spacesPage(['1'], '/wiki/api/v2/spaces?limit=2&cursor=loop') })
+      jsonResponse({
+        status: 200,
+        body: spacesPage(['1'], '/wiki/api/v2/spaces?limit=2&cursor=loop'),
+      }),
     )
-    const client = new ConfluenceClient({ baseUrl: 'https://acme.atlassian.net', email: 'a@b.c', apiToken: 't', fetchImpl, maxPages: 5, sleep: instantSleep })
+    const client = new ConfluenceClient({
+      baseUrl: 'https://acme.atlassian.net',
+      email: 'a@b.c',
+      apiToken: 't',
+      fetchImpl,
+      maxPages: 5,
+      sleep: instantSleep,
+    })
     await expect(client.listAllSpaces()).rejects.toThrow(/페이지네이션/)
     expect(fetchImpl).toHaveBeenCalledTimes(5)
   })
@@ -77,7 +102,12 @@ describe('ConfluenceClient', () => {
     let calls = 0
     const fetchImpl = vi.fn(async () => {
       calls += 1
-      if (calls <= 2) return jsonResponse({ status: 429, body: { message: 'slow down' }, headers: { 'Retry-After': '2' } })
+      if (calls <= 2)
+        return jsonResponse({
+          status: 429,
+          body: { message: 'slow down' },
+          headers: { 'Retry-After': '2' },
+        })
       return jsonResponse({ status: 200, body: spacesPage(['7']) })
     })
     const client = new ConfluenceClient({
@@ -87,7 +117,7 @@ describe('ConfluenceClient', () => {
       fetchImpl,
       sleep: async (ms) => {
         sleeps.push(ms)
-      }
+      },
     })
 
     const spaces = await client.listSpacesPage()
@@ -97,15 +127,33 @@ describe('ConfluenceClient', () => {
   })
 
   it('429가 재시도 상한을 넘으면 rate_limited 오류를 던진다', async () => {
-    const fetchImpl = vi.fn(async () => jsonResponse({ status: 429, body: {}, headers: { 'Retry-After': '0' } }))
-    const client = new ConfluenceClient({ baseUrl: 'https://acme.atlassian.net', email: 'a@b.c', apiToken: 't', fetchImpl, sleep: instantSleep, maxRetries: 2 })
-    await expect(client.listSpacesPage()).rejects.toMatchObject({ kind: 'rate_limited', status: 429 })
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ status: 429, body: {}, headers: { 'Retry-After': '0' } }),
+    )
+    const client = new ConfluenceClient({
+      baseUrl: 'https://acme.atlassian.net',
+      email: 'a@b.c',
+      apiToken: 't',
+      fetchImpl,
+      sleep: instantSleep,
+      maxRetries: 2,
+    })
+    await expect(client.listSpacesPage()).rejects.toMatchObject({
+      kind: 'rate_limited',
+      status: 429,
+    })
     expect(fetchImpl).toHaveBeenCalledTimes(3)
   })
 
   it('401은 재시도 없이 unauthorized로 즉시 실패한다', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ status: 401, body: {} }))
-    const client = new ConfluenceClient({ baseUrl: 'https://acme.atlassian.net', email: 'a@b.c', apiToken: 'wrong', fetchImpl, sleep: instantSleep })
+    const client = new ConfluenceClient({
+      baseUrl: 'https://acme.atlassian.net',
+      email: 'a@b.c',
+      apiToken: 'wrong',
+      fetchImpl,
+      sleep: instantSleep,
+    })
     await expect(client.listSpacesPage()).rejects.toMatchObject({ kind: 'unauthorized' })
     expect(fetchImpl).toHaveBeenCalledTimes(1)
   })
@@ -117,10 +165,19 @@ describe('ConfluenceClient', () => {
     const fetchImpl = vi.fn(async () =>
       jsonResponse({
         status: 200,
-        body: { results: [{ id: 9007199254740991, key: 'BIG', name: '정밀도 경계 스페이스' }], _links: {} }
-      })
+        body: {
+          results: [{ id: 9007199254740991, key: 'BIG', name: '정밀도 경계 스페이스' }],
+          _links: {},
+        },
+      }),
     )
-    const client = new ConfluenceClient({ baseUrl: 'https://acme.atlassian.net', email: 'a@b.c', apiToken: 't', fetchImpl, sleep: instantSleep })
+    const client = new ConfluenceClient({
+      baseUrl: 'https://acme.atlassian.net',
+      email: 'a@b.c',
+      apiToken: 't',
+      fetchImpl,
+      sleep: instantSleep,
+    })
     const spaces = await client.listSpacesPage()
     expect(typeof spaces.results[0]?.id).toBe('string')
     expect(spaces.results[0]?.id).toBe('9007199254740991')
@@ -130,7 +187,14 @@ describe('ConfluenceClient', () => {
     const fetchImpl = vi.fn(async () => {
       throw new Error('ECONNRESET')
     })
-    const client = new ConfluenceClient({ baseUrl: 'https://acme.atlassian.net', email: 'a@b.c', apiToken: 't', fetchImpl, sleep: instantSleep, maxRetries: 1 })
+    const client = new ConfluenceClient({
+      baseUrl: 'https://acme.atlassian.net',
+      email: 'a@b.c',
+      apiToken: 't',
+      fetchImpl,
+      sleep: instantSleep,
+      maxRetries: 1,
+    })
     await expect(client.listSpacesPage()).rejects.toMatchObject({ kind: 'network' })
     expect(fetchImpl).toHaveBeenCalledTimes(2)
   })
@@ -138,17 +202,29 @@ describe('ConfluenceClient', () => {
   it('기본 인증 헤더가 이메일과 토큰으로 구성된다', async () => {
     let authHeader: string | undefined
     const fetchImpl = vi.fn(async (_input: Request | string | URL, init?: RequestInit) => {
-      authHeader = (init?.headers as Record<string, string>).Authorization
+      authHeader = ((init?.headers ?? {}) as Record<string, string>).Authorization
       return jsonResponse({ status: 200, body: spacesPage(['1']) })
     })
-    const client = new ConfluenceClient({ baseUrl: 'https://acme.atlassian.net', email: 'dev@acme.io', apiToken: 'tok', fetchImpl, sleep: instantSleep })
+    const client = new ConfluenceClient({
+      baseUrl: 'https://acme.atlassian.net',
+      email: 'dev@acme.io',
+      apiToken: 'tok',
+      fetchImpl,
+      sleep: instantSleep,
+    })
     await client.listSpacesPage()
     expect(authHeader).toBe(`Basic ${Buffer.from('dev@acme.io:tok').toString('base64')}`)
   })
 
   it('verifyConnection은 스페이스 목록으로 연결을 검증한다', async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ status: 200, body: spacesPage(['1', '2']) }))
-    const client = new ConfluenceClient({ baseUrl: 'https://acme.atlassian.net', email: 'a@b.c', apiToken: 't', fetchImpl, sleep: instantSleep })
+    const client = new ConfluenceClient({
+      baseUrl: 'https://acme.atlassian.net',
+      email: 'a@b.c',
+      apiToken: 't',
+      fetchImpl,
+      sleep: instantSleep,
+    })
     const spaces = await client.verifyConnection()
     expect(spaces).toHaveLength(2)
   })

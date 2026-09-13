@@ -1,5 +1,5 @@
-import { app, BrowserWindow } from 'electron'
 import { join } from 'node:path'
+import { app, BrowserWindow } from 'electron'
 import { ko } from '../core/i18n/ko'
 
 export function createMainWindow(): BrowserWindow {
@@ -18,8 +18,8 @@ export function createMainWindow(): BrowserWindow {
       nodeIntegration: false,
       nodeIntegrationInWorker: false,
       webviewTag: false,
-      preload: join(__dirname, '../preload/index.js')
-    }
+      preload: join(__dirname, '../preload/index.js'),
+    },
   })
 
   win.once('ready-to-show', () => win.show())

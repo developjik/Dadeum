@@ -1,13 +1,13 @@
-import { app, safeStorage } from 'electron'
 import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { app, safeStorage } from 'electron'
 import {
   decodeCredentials,
   decryptToken,
+  type Encryptor,
   encodeCredentials,
   encryptToken,
-  type Encryptor,
-  type StoredCredentials
+  type StoredCredentials,
 } from '../core/auth/credentialCodec'
 import { ConfluenceClient } from '../core/confluence/client'
 
@@ -15,14 +15,14 @@ import { ConfluenceClient } from '../core/confluence/client'
 const safeStorageEncryptor: Encryptor = {
   isEncryptionAvailable: () => safeStorage.isEncryptionAvailable(),
   encrypt: (plaintext) => safeStorage.encryptString(plaintext),
-  decrypt: (ciphertext) => safeStorage.decryptString(ciphertext)
+  decrypt: (ciphertext) => safeStorage.decryptString(ciphertext),
 }
 
 function credentialsFilePath(): string {
   return join(app.getPath('userData'), 'auth.json')
 }
 
-export function loadStoredCredentials(): StoredCredentials | null {
+function loadStoredCredentials(): StoredCredentials | null {
   const path = credentialsFilePath()
   if (!existsSync(path)) return null
   try {
@@ -33,12 +33,16 @@ export function loadStoredCredentials(): StoredCredentials | null {
   }
 }
 
-export function saveCredentials(baseUrl: string, email: string, apiToken: string): StoredCredentials {
+export function saveCredentials(
+  baseUrl: string,
+  email: string,
+  apiToken: string,
+): StoredCredentials {
   const stored: StoredCredentials = {
     baseUrl,
     email,
     tokenCiphertextBase64: encryptToken(safeStorageEncryptor, apiToken),
-    savedAt: new Date().toISOString()
+    savedAt: new Date().toISOString(),
   }
   writeFileSync(credentialsFilePath(), encodeCredentials(stored), 'utf8')
   return stored
@@ -71,5 +75,12 @@ export interface ConnectionStatus {
 export function getConnectionStatus(): ConnectionStatus {
   const stored = loadStoredCredentials()
   if (!stored) return { connected: false }
+  // 파일이 있어도 토큰 복호화가 실패하면 미연결로 판정한다 —
+  // '연결됨'으로 보이다가 모든 API가 실패하는 상태 불일치를 막는다.
+  try {
+    decryptToken(safeStorageEncryptor, stored.tokenCiphertextBase64)
+  } catch {
+    return { connected: false }
+  }
   return { connected: true, baseUrl: stored.baseUrl, email: stored.email }
 }

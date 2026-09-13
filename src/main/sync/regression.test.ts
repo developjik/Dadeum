@@ -1,15 +1,15 @@
-import { mkdirSync, mkdtempSync, writeFileSync, readFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ConfluenceClient } from '../../core/confluence/client'
-import { SyncStateDb } from '../../core/store/syncState'
 import { fileHashOf } from '../../core/store/hash'
-import { machineFor } from './machines'
-import { pullSpaceByKey } from './pullService'
-import { resolveConflict } from './conflictService'
+import { SyncStateDb } from '../../core/store/syncState'
 import { pushApprovedPages } from '../push/pushService'
+import { resolveConflict } from './conflictService'
+import { machineFor } from './machines'
 import { isAutoPullRunning, stopAutoPull } from './pollCoordinator'
+import { pullSpaceByKey } from './pullService'
 
 /** R-2 회귀 테스트(세대 3 아키텍트 COMMENT 조건): B-4 기동·B-2R 개인 스페이스 차단·B-7 push 후 DB 갱신. */
 
@@ -25,10 +25,18 @@ describe('R-2 회귀 테스트', () => {
       sleep: () => Promise.resolve(),
       fetchImpl: (async (input: Request | string | URL) => {
         const url = String(input)
-        if (url.includes('/api/v2/spaces/sp-x/pages')) return new Response(JSON.stringify({ results: [], _links: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } })
-        if (url.includes('/api/v2/spaces')) return new Response(JSON.stringify({ results: [{ id: 'sp-x', key: 'REG', name: '회귀' }], _links: {} }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+        if (url.includes('/api/v2/spaces/sp-x/pages'))
+          return new Response(JSON.stringify({ results: [], _links: {} }), {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        if (url.includes('/api/v2/spaces'))
+          return new Response(
+            JSON.stringify({ results: [{ id: 'sp-x', key: 'REG', name: '회귀' }], _links: {} }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          )
         return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })
-      }) as unknown as typeof fetch
+      }) as unknown as typeof fetch,
     })
 
     const result = await pullSpaceByKey({ client, spaceKey: 'REG', workspaceRoot: root, db })
@@ -43,7 +51,10 @@ describe('R-2 회귀 테스트', () => {
     mkdirSync(join(root, '.sync'), { recursive: true })
     mkdirSync(join(root, 'spaces/personal-63dcb/가이드'), { recursive: true })
     const relPath = 'spaces/personal-63dcb/가이드/index.md'
-    writeFileSync(join(root, relPath), '---\npageId: "1001"\nspaceKey: "~63dcbacc"\ntitle: "가이드"\nversion: 2\nparentId: null\nurl: ""\nupdatedAt: null\nsyncedAt: null\n---\n\n로컬 본문')
+    writeFileSync(
+      join(root, relPath),
+      '---\npageId: "1001"\nspaceKey: "~63dcbacc"\ntitle: "가이드"\nversion: 2\nparentId: null\nurl: ""\nupdatedAt: null\nsyncedAt: null\n---\n\n로컬 본문',
+    )
     const db = new SyncStateDb(join(root, '.sync', 'sync-state.db'))
     db.upsertPage({
       pageId: '1001',
@@ -52,7 +63,7 @@ describe('R-2 회귀 테스트', () => {
       title: '가이드',
       version: 2,
       parentId: null,
-      contentHash: 'stale'
+      contentHash: 'stale',
     })
 
     // agent-run 진입(머신 키 = 원본 스페이스 키 '~63dcbacc')
@@ -64,11 +75,27 @@ describe('R-2 회귀 테스트', () => {
       email: 'dev@acme.io',
       apiToken: 'tok',
       sleep: () => Promise.resolve(),
-      fetchImpl: (async () => new Response(JSON.stringify({ id: '1001', title: '가이드', version: { number: 9 }, body: { storage: { value: '<p>원격</p>' } } }), { status: 200, headers: { 'Content-Type': 'application/json' } })) as unknown as typeof fetch
+      fetchImpl: (async () =>
+        new Response(
+          JSON.stringify({
+            id: '1001',
+            title: '가이드',
+            version: { number: 9 },
+            body: { storage: { value: '<p>원격</p>' } },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )) as unknown as typeof fetch,
     })
 
     await expect(
-      resolveConflict({ choice: 'overwrite', path: relPath, pageId: '1001', client, workspaceRoot: root, db })
+      resolveConflict({
+        choice: 'overwrite',
+        path: relPath,
+        pageId: '1001',
+        client,
+        workspaceRoot: root,
+        db,
+      }),
     ).rejects.toThrow(/덮어쓸 수 없습니다/)
     machine.apply('endAgentRun')
   })
@@ -80,7 +107,7 @@ describe('R-2 회귀 테스트', () => {
     const relPath = 'spaces/DEV/가이드/index.md'
     writeFileSync(
       join(root, relPath),
-      '---\npageId: "1001"\nspaceKey: "DEV"\ntitle: "가이드"\nversion: 2\nparentId: null\nurl: "https://acme.atlassian.net/wiki/spaces/DEV/pages/1001"\nupdatedAt: null\nsyncedAt: null\n---\n\n수정 본문'
+      '---\npageId: "1001"\nspaceKey: "DEV"\ntitle: "가이드"\nversion: 2\nparentId: null\nurl: "https://acme.atlassian.net/wiki/spaces/DEV/pages/1001"\nupdatedAt: null\nsyncedAt: null\n---\n\n수정 본문',
     )
     const db = new SyncStateDb(join(root, '.sync', 'sync-state.db'))
     db.upsertPage({
@@ -90,12 +117,12 @@ describe('R-2 회귀 테스트', () => {
       title: '가이드',
       version: 2,
       parentId: null,
-      contentHash: 'old-hash'
+      contentHash: 'old-hash',
     })
 
     const snapshot = {
       capturedAt: new Date().toISOString(),
-      entries: new Map([[relPath, { hash: fileHashOf(readFileSync(join(root, relPath))) }]])
+      entries: new Map([[relPath, { hash: fileHashOf(readFileSync(join(root, relPath))) }]]),
     }
     const client = new ConfluenceClient({
       baseUrl: 'https://acme.atlassian.net',
@@ -106,14 +133,29 @@ describe('R-2 회귀 테스트', () => {
         const url = String(input)
         const method = init?.method ?? 'GET'
         if (url.includes('/api/v2/pages/1001') && method === 'GET') {
-          return new Response(JSON.stringify({ id: '1001', title: '가이드', version: { number: 2 }, body: { storage: { value: '<p>서버</p>' } } }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+          return new Response(
+            JSON.stringify({
+              id: '1001',
+              title: '가이드',
+              version: { number: 2 },
+              body: { storage: { value: '<p>서버</p>' } },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          )
         }
         if (url.includes('/api/v2/pages/1001') && method === 'PUT') {
           const requested = JSON.parse(String(init?.body)) as { version: { number: number } }
-          return new Response(JSON.stringify({ id: '1001', title: '가이드', version: { number: requested.version.number } }), { status: 200, headers: { 'Content-Type': 'application/json' } })
+          return new Response(
+            JSON.stringify({
+              id: '1001',
+              title: '가이드',
+              version: { number: requested.version.number },
+            }),
+            { status: 200, headers: { 'Content-Type': 'application/json' } },
+          )
         }
         return new Response('[]', { status: 200, headers: { 'Content-Type': 'application/json' } })
-      }) as unknown as typeof fetch
+      }) as unknown as typeof fetch,
     })
 
     const outcome = await pushApprovedPages({
@@ -123,7 +165,7 @@ describe('R-2 회귀 테스트', () => {
       machine: machineFor('DEV'),
       snapshot,
       approvedPaths: [relPath],
-      spaceId: 'sp-1'
+      spaceId: 'sp-1',
     })
 
     expect(outcome.uploaded).toHaveLength(1)

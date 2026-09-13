@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
-import { SyncStateDb, type PageRecord } from '../core/store/syncState'
+import { type PageRecord, SyncStateDb } from '../core/store/syncState'
 import { buildPageTree, type PageTreeNode } from '../core/store/tree'
 import { isSyncTarget, parsePageFile, workspaceLayout } from '../core/store/workspace'
 
@@ -32,11 +32,6 @@ export function getWorkspaceDb(): SyncStateDb {
   return cachedDb
 }
 
-/** 하위 호환 래퍼 — 기존 호출부는 getWorkspaceDb()를 사용한다. */
-export function openWorkspaceDb(): SyncStateDb {
-  return getWorkspaceDb()
-}
-
 export function listPageTree(spaceKey: string): PageTreeNode[] {
   const pages = getWorkspaceDb().listPagesBySpace(spaceKey)
   return buildPageTree(
@@ -46,8 +41,8 @@ export function listPageTree(spaceKey: string): PageTreeNode[] {
       path: page.path,
       version: page.version,
       parentId: page.parentId,
-      remoteDeleted: page.remoteDeleted
-    }))
+      remoteDeleted: page.remoteDeleted,
+    })),
   )
 }
 
@@ -71,14 +66,24 @@ export function readPageFileGuarded(relativePath: string): ReadPageResult {
     throw new Error(`페이지 파일을 찾을 수 없습니다: ${normalized}`)
   }
   const { meta, body } = parsePageFile(readFileSync(absPath, 'utf8'))
-  return { pageId: meta.pageId, title: meta.title, url: meta.url, version: meta.version, markdown: body }
+  return {
+    pageId: meta.pageId,
+    title: meta.title,
+    url: meta.url,
+    version: meta.version,
+    markdown: body,
+  }
 }
 
-/** 외부 브라우저로 열 수 있는 URL인지 판정 — 연결된 사이트의 https 페이지만 허용. */
+/** 온보딩에 필요한 Atlassian 공식 도메인(API 토큰 발급 페이지 등). */
+const TRUSTED_HOSTS = new Set(['id.atlassian.com', 'support.atlassian.com'])
+
+/** 외부 브라우저로 열 수 있는 URL인지 판정 — 연결된 사이트와 Atlassian 공식 도메인의 https만 허용. */
 export function isAllowedExternalUrl(url: string, connectedBaseUrl: string | null): boolean {
   try {
     const parsed = new URL(url)
     if (parsed.protocol !== 'https:') return false
+    if (TRUSTED_HOSTS.has(parsed.hostname)) return true
     if (!connectedBaseUrl) return false
     const base = new URL(connectedBaseUrl)
     return parsed.hostname === base.hostname
