@@ -58,7 +58,7 @@ describe('buildClaudeArgs', () => {
       '--permission-mode',
       'acceptEdits',
       '--allowedTools',
-      'Read,Edit,Write,Glob,Grep',
+      'Read,Glob,Grep,Edit,Write',
     ])
   })
 
@@ -66,6 +66,11 @@ describe('buildClaudeArgs', () => {
     const args = buildClaudeArgs('sess-9')
     expect(args).toContain('--resume')
     expect(args[args.indexOf('--resume') + 1]).toBe('sess-9')
+  })
+  it('spaceRoot를 주면 쓰기 도구가 스페이스 루트로 스코프된다', () => {
+    const args = buildClaudeArgs(undefined, '/ws/DEV')
+    const allowed = args[args.indexOf('--allowedTools') + 1]
+    expect(allowed).toBe('Read,Glob,Grep,Edit(//ws/DEV/**),Write(//ws/DEV/**)')
   })
 })
 
@@ -181,5 +186,45 @@ describe('ClaudeCodeAdapter 계약', () => {
     const promise = expect(handle.terminal).resolves.toBe('error')
     proc.emitClose(1)
     await promise
+  })
+})
+
+describe('동시 런·stdin 안전(P1)', () => {
+  it('이후 런 시작 후 이전 런의 cancel이 다른 프로세스를 죽리지 않는다', async () => {
+    const procA = fakeProcess()
+    const procB = fakeProcess()
+    const adapter = new ClaudeCodeAdapter({
+      spawnImpl: (_command, _args, options) => (options.cwd === '/ws/A' ? procA : procB),
+    })
+    const handleA = adapter.start({ prompt: 'a', cwd: '/ws/A' })
+    const handleB = adapter.start({ prompt: 'b', cwd: '/ws/B' })
+
+    handleA.cancel()
+
+    expect(procA.killCalls).toContain('SIGTERM')
+    expect(procB.killCalls).toHaveLength(0)
+
+    procA.emitClose(null)
+    procB.emitClose(0)
+    await expect(handleA.terminal).resolves.toBe('cancelled')
+    await expect(handleB.terminal).resolves.toBe('completed')
+  })
+
+  it('stdin에 error 리스너를 등록한다(EPIPE 미처리 예외 방지)', async () => {
+    const registered: string[] = []
+    const proc = fakeProcess()
+    ;(proc as unknown as { stdin: unknown }).stdin = {
+      write: () => undefined,
+      end: () => undefined,
+      on: (event: string) => {
+        registered.push(event)
+      },
+    }
+    const adapter = new ClaudeCodeAdapter({ spawnImpl: () => proc })
+    const handle = adapter.start({ prompt: 'p', cwd: '/ws' })
+    proc.emitClose(0)
+
+    await expect(handle.terminal).resolves.toBe('completed')
+    expect(registered).toContain('error')
   })
 })

@@ -24,6 +24,8 @@ export interface PullResult {
   skippedDirty: number
   /** 원격에서 삭제된 페이지를 .sync/trash로 옮긴 수 */
   tombstoned: number
+  /** 페이지 단위 격리로 건너뛴 실패 페이지(404·권한·첨부 오류 등) */
+  failed: Array<{ pageId: string; title: string; error: string }>
 }
 
 /**
@@ -133,17 +135,28 @@ export async function pullFullSpace(options: {
 
     let attachmentCount = 0
     let skippedDirty = 0
+    const failedPulls: Array<{ pageId: string; title: string; error: string }> = []
     for (const summary of summaries) {
-      const result = await pullSinglePage({
-        client,
-        space,
-        workspaceRoot,
-        db,
-        summary,
-        dir: dirByPageId.get(summary.id)!,
-      })
-      attachmentCount += result.attachments
-      if (result.skipped) skippedDirty += 1
+      try {
+        const result = await pullSinglePage({
+          client,
+          space,
+          workspaceRoot,
+          db,
+          summary,
+          dir: dirByPageId.get(summary.id)!,
+        })
+        attachmentCount += result.attachments
+        if (result.skipped) skippedDirty += 1
+      } catch (cause) {
+        // 페이지 단위 격리: 한 페이지 실패(404·권한·첨부 오류·디스크)가
+        // 스페이스 전체 pull과 tombstone 대차를 중단시키지 않는다.
+        failedPulls.push({
+          pageId: summary.id,
+          title: summary.title,
+          error: String(cause instanceof Error ? cause.message : cause),
+        })
+      }
     }
 
     // 원격 삭제 대차(F-3): 전체 목록이 있으므로 풀pull에서 tombstone 처리한다
@@ -158,10 +171,11 @@ export async function pullFullSpace(options: {
 
     return {
       spaceKey: space.key,
-      pages: summaries.length,
+      pages: summaries.length - failedPulls.length,
       attachments: attachmentCount,
       skippedDirty,
       tombstoned: reconciliation.tombstoned.length,
+      failed: failedPulls,
     }
   } finally {
     machine.apply('endPull')

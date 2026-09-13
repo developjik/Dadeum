@@ -20,6 +20,7 @@ import { pushApproved } from './push/pushApproval'
 import { type ConflictChoice, resolveConflict } from './sync/conflictService'
 import { machineFor } from './sync/machines'
 import {
+  beginIncrementalPull,
   isAutoPullRunning,
   startAutoPull,
   stopAllAutoPull,
@@ -64,7 +65,7 @@ function requireClient(): ConfluenceClient {
   return client
 }
 
-const chatRuns = new ChatRunService()
+export const chatRuns = new ChatRunService()
 chatRuns.registerAdapter(new ClaudeCodeAdapter())
 
 /**
@@ -193,7 +194,7 @@ export function registerAuthAndSpaceHandlers(): void {
     const client = requireClient()
     const space = (await client.listAllSpaces()).find((candidate) => candidate.key === spaceKey)
     if (!space) throw new Error(`스페이스를 찾을 수 없습니다: ${spaceKey}`)
-    const since = new Date(Date.now() - 5 * 60 * 1000).toISOString() // 5분 overlap
+    const since = beginIncrementalPull(getWorkspaceDb(), space.key)
     return await pullIncremental({
       client,
       space,

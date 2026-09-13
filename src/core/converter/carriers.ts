@@ -16,8 +16,16 @@ export function contentHash(serializedXml: string): string {
   return createHash('sha256').update(serializedXml, 'utf8').digest('hex').slice(0, 8)
 }
 
+/** 내용의 최대 백틱 런보다 긴 펜스를 만든다(내부 ``` 라인 조기 종료 방지). */
+export function fenceFor(content: string): string {
+  let maxRun = 0
+  for (const run of content.match(/`+/g) ?? []) maxRun = Math.max(maxRun, run.length)
+  return '`'.repeat(Math.max(3, maxRun + 1))
+}
+
 export function carrierFence(name: string, hashId: string, serializedXml: string): string {
-  return [`\`\`\`${CARRIER_LANG} name=${name} id=${hashId}`, serializedXml, '```'].join('\n')
+  const fence = fenceFor(serializedXml)
+  return [`${fence}${CARRIER_LANG} name=${name} id=${hashId}`, serializedXml, fence].join('\n')
 }
 
 export function inlineRefToken(hashId: string): string {

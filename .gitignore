@@ -8,3 +8,5 @@ coverage/
 # 로컬 동기화된 개인 Confluence 문서·QA 산출물 — 커밋 금지
 golden-pass-workspace/
 artifacts/
+.env
+.env.*

@@ -13,7 +13,11 @@ import { parseStreamJsonLine } from './streamJson'
 /** 테스트 주입을 위한 최소 프로세스 표면(node ChildProcess와 호환). */
 export interface AgentProcess {
   pid?: number
-  stdin: { write(chunk: string): void; end(): void }
+  stdin: {
+    write(chunk: string): void
+    end(): void
+    on?(event: 'error', listener: (cause: Error) => void): void
+  }
   stdout: {
     setEncoding(enc: string): void
     on(event: 'data', listener: (chunk: string) => void): void
@@ -54,7 +58,10 @@ export function augmentedGuiPath(current: string | undefined): string {
   return parts.join(':')
 }
 
-export function buildClaudeArgs(sessionId: string | undefined): string[] {
+export function buildClaudeArgs(sessionId: string | undefined, spaceRoot?: string): string[] {
+  // 파일 수정 도구는 스페이스 루트로 경로 스코프 — 프롬프트 인젝션에 의한
+  // 워크스페이스 밖 쓰기를 차단한다(읽기 도구는 CLI 기본 정책을 따른다).
+  const writeScope = spaceRoot ? scopedToolRule(spaceRoot) : ''
   const args = [
     '-p',
     '--output-format',
@@ -63,17 +70,22 @@ export function buildClaudeArgs(sessionId: string | undefined): string[] {
     '--permission-mode',
     'acceptEdits',
     '--allowedTools',
-    'Read,Edit,Write,Glob,Grep',
+    `Read,Glob,Grep,Edit${writeScope},Write${writeScope}`,
   ]
   if (sessionId) args.push('--resume', sessionId)
   return args // 프롬프트는 stdin으로 전달
+}
+
+/** Claude Code 경로 규칙 — 절대 경로는 `//` 접두(gitignore 방식). */
+function scopedToolRule(spaceRoot: string): string {
+  const posix = spaceRoot.replace(/\\/g, '/')
+  return `(//${posix.replace(/^\/+/, '')}/**)`
 }
 
 export class ClaudeCodeAdapter implements AgentAdapter {
   readonly name = 'claude-code'
 
   private readonly spawnImpl: SpawnFn
-  private activeChild: AgentProcess | null = null
 
   constructor(options?: { spawnImpl?: SpawnFn }) {
     this.spawnImpl = options?.spawnImpl ?? ((command, args, opts) => nodeSpawn(command, args, opts))
@@ -85,6 +97,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     let cancelled = false
     let timedOut = false
     let settled = false
+    let activeChild: AgentProcess | null = null
     let timer: ReturnType<typeof setTimeout> | undefined
 
     const emit = (event: AgentRunEvent): void => {
@@ -103,7 +116,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       const env = { ...process.env, PATH: augmentedGuiPath(process.env.PATH) }
       let child: AgentProcess
       try {
-        child = this.spawnImpl(command, buildClaudeArgs(request.sessionId), {
+        child = this.spawnImpl(command, buildClaudeArgs(request.sessionId, request.cwd), {
           cwd: request.cwd,
           env,
           detached: process.platform === 'darwin',
@@ -117,8 +130,10 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         settle('error')
         return
       }
-      this.activeChild = child
+      activeChild = child
       emit({ type: 'started', pid: child.pid })
+      // 스폰 직후 죽은 자식의 stdin write EPIPE가 미처리 예외로 메인을 죽이지 않게 한다
+      child.stdin.on?.('error', () => undefined)
       // 프롬프트는 stdin으로 전달(claude -p는 stdin/positional 양쪽 지원, 파이프 환경에서 stdin이 안전)
       child.stdin.write(request.prompt)
       child.stdin.end()
@@ -173,7 +188,7 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       terminal,
       cancel: () => {
         cancelled = true
-        const child = this.activeChild
+        const child = activeChild
         if (!child) return
         if (process.platform === 'win32') {
           // Windows: 프로세스 트리 종료(§8.5)

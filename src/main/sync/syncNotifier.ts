@@ -11,6 +11,7 @@ export interface SyncEvent {
   updated: number
   skippedDirty: number
   tombstoned: number
+  failed: number
 }
 
 let sender: WebContents | null = null

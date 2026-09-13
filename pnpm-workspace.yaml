@@ -1,14 +1,13 @@
 packages: []
 
+# pnpm 11 정식 빌드 승인 맵(구 onlyBuiltDependencies 대체 — pnpm 11부터 무시됨).
+# - electron: 바이너리 다운로드 postinstall
+# - esbuild: 플랫폼 바이너리 설치
+# - lefthook: git 훅 자동 설치(prepare 스크립트와 이중 경로)
+# better-sqlite3 v13은 install 스크립트 자체가 없다(prebuilds 정적 탑재) — 항목 불필요.
 allowBuilds:
-  electron-winstaller: set this to true or false
-  esbuild: set this to true or false
-  lefthook: set this to true or false
-
-onlyBuiltDependencies:
-  - better-sqlite3
-  - electron
-  - electron-winstaller
-  - esbuild
+  electron: true
+  esbuild: true
+  lefthook: true
 
 strictDepBuilds: false

@@ -80,7 +80,10 @@ export function App(): React.ReactElement {
   }
 
   const reviewCount = changeset
-    ? changeset.modified.length + changeset.added.length + changeset.attachments.length
+    ? changeset.modified.length +
+      changeset.added.length +
+      changeset.attachments.length +
+      changeset.missing.length
     : 0
   const conflictCount = conflicts.length
 

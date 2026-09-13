@@ -1,5 +1,5 @@
 import type { Element, Node } from '@xmldom/xmldom'
-import { carrierFence, contentHash, inlineRefToken } from './carriers'
+import { carrierFence, contentHash, fenceFor, inlineRefToken } from './carriers'
 import {
   escapeStorageAttr,
   isElement,
@@ -242,13 +242,29 @@ function convertInlineOrBlockShallow(node: Node, context: ConversionContext, dep
 function convertPre(node: Element): string {
   const codeNode = Array.from(node.getElementsByTagName('code'))[0]
   const content = codeNode ? (codeNode.textContent ?? '') : (node.textContent ?? '')
-  return `\`\`\`\n${content.replace(/\n$/, '')}\n\`\`\``
+  const body = content.replace(/\n$/, '')
+  // 내용에 ``` 라인이 있으면 3백틱 펜스가 조기 닫혀 구조가 붕괴한다 — 런보다 길게.
+  const fence = fenceFor(body)
+  return `${fence}\n${body}\n${fence}`
 }
 
 function convertTable(node: Element, context: ConversionContext, depth = 0): string {
-  const rows = Array.from(node.getElementsByTagName('tr'))
-  if (rows.length === 0) return blockCarrier(node, context)
+  // 병합 셀(colspan/rowspan)·정렬 스타일은 Markdown 표로 무손실 표현 불가 —
+  // 표 전체를 캐리어로 승격해 verbatim 보존한다(셀 병합이 조용히 풀리는 것 방지).
+  if (hasUnsupportedCellAttributes(node)) return blockCarrier(node, context)
 
+  // 직계 tr만 수집 — getElementsByTagName은 중첩 표의 tr까지 재귀 수집해
+  // 외부 표에 유령 행을 병합시킨다(왕복 시 원본에 없는 행 추가).
+  const rowContainers = Array.from(node.childNodes).filter(
+    (child) => isElement(child) && ['tbody', 'thead', 'tfoot'].includes(localName(child)),
+  ) as Element[]
+  const rowsSource: Array<Element | Node> = rowContainers.length > 0 ? rowContainers : [node]
+  const rows = rowsSource.flatMap((container) =>
+    Array.from(container.childNodes).filter(
+      (child) => isElement(child) && localName(child) === 'tr',
+    ),
+  ) as Element[]
+  if (rows.length === 0) return blockCarrier(node, context)
   const cellText = (row: Element): string[] => {
     const cells = Array.from(row.childNodes).filter(
       (child) => isElement(child) && (localName(child) === 'th' || localName(child) === 'td'),
@@ -270,12 +286,33 @@ function convertTable(node: Element, context: ConversionContext, depth = 0): str
 }
 
 function escapeMarkdownText(text: string): string {
-  return text
-    .replace(/\\/g, '\\\\')
-    .replace(/([*_[\]`~<>])/g, '\\$1')
-    .replace(/^(#{1,6})(\s)/gm, '\\$1$2')
-    .replace(/^(\s*)([-+])(\s)/gm, '$1\\$2$3')
-    .replace(/^(\s*)(\d+)\.(\s)/gm, '$1$2\\. $3')
+  return (
+    text
+      .replace(/\\/g, '\\\\')
+      .replace(/([*_[\]`~<>])/g, '\\$1')
+      .replace(/^(#{1,6})(\s)/gm, '\\$1$2')
+      .replace(/^(\s*)([-+])(\s)/gm, '$1\\$2$3')
+      .replace(/^(\s*)(\d+)\.(\s)/gm, '$1$2\\. $3')
+      // 라인 전체가 -/=만으로 이루어지면 setext 밑줄·thematicBreak로 해석된다
+      .replace(
+        /^(\s*)([-=]+)(\s*)$/gm,
+        (_match, indent: string, marker: string) => `${indent}\\${marker}`,
+      )
+  )
+}
+
+/** Markdown 표가 보존할 수 없는 셀 속성을 가졌는지 판정. */
+function hasUnsupportedCellAttributes(node: Element): boolean {
+  const cells = [
+    ...Array.from(node.getElementsByTagName('td')),
+    ...Array.from(node.getElementsByTagName('th')),
+  ]
+  for (const cell of cells) {
+    for (const attr of ['colspan', 'rowspan', 'style', 'align', 'valign']) {
+      if (cell.getAttribute(attr)) return true
+    }
+  }
+  return false
 }
 
 function escapeLinkHref(href: string): string {

@@ -19,6 +19,7 @@
     "src/main/**/*",
     "src/preload/**/*",
     "src/core/**/*",
+    "scripts/**/*",
     "electron.vite.config.ts",
     "vitest.config.ts"
   ]

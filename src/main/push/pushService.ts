@@ -68,6 +68,21 @@ export async function pushApprovedPages(options: {
     // 신규 페이지는 부모 먼저(위상 정렬: 경로 깊이 순)
     const ordered = [...approvedPaths].sort((a, b) => depth(a) - depth(b))
     for (const relPath of ordered) {
+      // 페이지별 업로드 직전 해시 재검증 — 직전 페이지의 네트워크 I/O 사이에 파일이
+      // 바뀌면(외부 편집기 등) 승인 무결성이 깨지므로 나머지를 즉시 중단한다.
+      const entry = snapshot.entries.get(relPath)
+      const absPath = join(workspaceRoot, relPath)
+      if (
+        !entry ||
+        !existsSync(absPath) ||
+        fileHashOf(readFileSync(absPath, 'utf8')) !== entry.hash
+      ) {
+        outcome.failed.push({
+          path: relPath,
+          error: '업로드 도중 파일이 변경되었습니다. 다시 검토(diff)하고 승인하세요.',
+        })
+        break
+      }
       try {
         await pushOne({ client, workspaceRoot, db, spaceId, relPath }, outcome)
       } catch (cause) {

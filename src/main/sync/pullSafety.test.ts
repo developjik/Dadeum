@@ -10,8 +10,10 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ConfluenceClient } from '../../core/confluence/client'
+import { fileHashOf } from '../../core/store/hash'
 import { SyncStateDb } from '../../core/store/syncState'
 import { machineFor } from './machines'
+import { beginIncrementalPull } from './pollCoordinator'
 import { pullFullSpace } from './pullService'
 
 /**
@@ -165,6 +167,80 @@ describe('풀pull 안전장치(P0 회귀)', () => {
     // 자동 삭제가 아니라 trash 이동 백업이다
     const trashRoot = join(root, '.sync', 'trash')
     expect(readdirSync(trashRoot).length).toBeGreaterThan(0)
+    db.close()
+  })
+})
+
+describe('풀pull 페이지 단위 격리(P1)', () => {
+  it('한 페이지 404가 전체 pull·tombstone 대차를 중단시키지 않는다', async () => {
+    const { root, db } = setup('ISOLD')
+    const summaries = [
+      { id: '990101', title: '정상1', version: { number: 1 }, parentId: null },
+      { id: '990102', title: '사라짐', version: { number: 1 }, parentId: null },
+      { id: '990103', title: '정상2', version: { number: 1 }, parentId: null },
+    ]
+    const client = new ConfluenceClient({
+      baseUrl: 'https://acme.atlassian.net',
+      email: 'dev@acme.io',
+      apiToken: 'tok',
+      sleep: () => Promise.resolve(),
+      fetchImpl: (async (input: Request | string | URL) => {
+        const url = String(input)
+        if (url.includes('/api/v2/spaces/sp-isold/pages'))
+          return jsonResponse({ results: summaries, _links: {} })
+        if (url.includes('/api/v2/pages/990102')) return new Response(null, { status: 404 })
+        const match = /\/api\/v2\/pages\/(\d+)/.exec(url)
+        if (match) {
+          const summary = summaries.find((page) => page.id === match[1])
+          return jsonResponse({
+            id: match[1],
+            title: summary?.title ?? '',
+            version: { number: summary?.version.number ?? 1 },
+            body: { storage: { value: `<p>본문 ${match[1]}</p>` } },
+          })
+        }
+        if (url.includes('/child/attachment')) return jsonResponse({ results: [] })
+        return jsonResponse({ results: [], _links: {} })
+      }) as unknown as typeof fetch,
+    })
+    // 원격에 없는 기존 페이지 — tombstone 대차가 여전히 도는지 검증용
+    // (contentHash를 실제 파일과 일치시켜 'clean' 상태로 — dirty면 충돌 후보로 남는다)
+    mkdirSync(join(root, 'spaces/ISOLD/고아'), { recursive: true })
+    const orphanPath = join(root, 'spaces/ISOLD/고아/index.md')
+    writeFileSync(orphanPath, '---\npageId: "990999"\n---\n\n로컬 사본')
+    db.upsertPage({
+      pageId: '990999',
+      spaceKey: 'ISOLD',
+      path: 'spaces/ISOLD/고아/index.md',
+      title: '고아',
+      version: 1,
+      parentId: null,
+      contentHash: fileHashOf(readFileSync(orphanPath)),
+    })
+
+    const result = await pullFullSpace({
+      client,
+      space: { id: 'sp-isold', key: 'ISOLD', name: '테스트' },
+      workspaceRoot: root,
+      db,
+    })
+    expect(result.failed.map((failure) => failure.pageId)).toEqual(['990102'])
+    expect(result.pages).toBe(2)
+    expect(existsSync(join(root, 'spaces/ISOLD/정상1/index.md'))).toBe(true)
+    expect(existsSync(join(root, 'spaces/ISOLD/정상2/index.md'))).toBe(true)
+    expect(result.tombstoned).toBe(1)
+    expect(db.getPage('990999')?.remoteDeleted).toBe(true)
+    db.close()
+  })
+
+  it('beginIncrementalPull은 직전 pull 시작 시각 기준 since를 반환하고 이번 시작을 기록한다', () => {
+    const { db } = setup('SINCET')
+    beginIncrementalPull(db, 'SINCET') // 첫 호출 — 이전 기록 없음
+    const before = Date.now()
+    const since = beginIncrementalPull(db, 'SINCET')
+    // 직전 pull '시작' 시각 - 5분 → 진행 중 변경 누락 방지
+    expect(Date.parse(since)).toBeLessThanOrEqual(before - 5 * 60 * 1000)
+    expect(db.lastPullStartAt('SINCET')).toBeTruthy()
     db.close()
   })
 })

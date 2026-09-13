@@ -47,6 +47,7 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
   const total = changeset
     ? changeset.modified.length + changeset.added.length + changeset.attachments.length
     : 0
+  const missingCount = changeset?.missing.length ?? 0
 
   return (
     <section className="review-pane" aria-label="upload-review">
@@ -69,7 +70,12 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
                   {ko.review.attachmentCount(changeset.attachments.length)}
                 </span>
               ) : null}
-              {total === 0 ? <span className="badge badge--neutral">{ko.review.empty}</span> : null}
+              {missingCount > 0 ? (
+                <span className="badge badge--danger">{ko.review.missingCount(missingCount)}</span>
+              ) : null}
+              {total === 0 && missingCount === 0 ? (
+                <span className="badge badge--neutral">{ko.review.empty}</span>
+              ) : null}
             </>
           ) : null}
         </div>
@@ -85,8 +91,9 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
           {ko.review.recheck}
         </button>
       </div>
+      {!changeset ? <p className="review-pane__hint">{ko.app.loading}</p> : null}
 
-      {changeset && total > 0 ? (
+      {changeset && (total > 0 || missingCount > 0) ? (
         <>
           {changeset.modified.length > 0 ? (
             <div className="changeset-group">
@@ -152,6 +159,24 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
                       <span className="cs-item__path">{attachment.path}</span>
                       <span className="badge badge--neutral">{ko.review.attachments}</span>
                     </CheckItem>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
+          {missingCount > 0 ? (
+            <div className="changeset-group">
+              <span className="changeset-group__label">{ko.review.missing}</span>
+              <ul className="cs-list">
+                {changeset.missing.map((page) => (
+                  <li key={page.path} className="cs-item">
+                    <div className="cs-item__row">
+                      <span className="cs-item__label">{page.title}</span>
+                      <span className="cs-item__path">{page.path}</span>
+                      <span className="badge badge--danger">{ko.review.missing}</span>
+                    </div>
+                    <p className="cs-item__hint">{ko.review.missingHint}</p>
                   </li>
                 ))}
               </ul>

@@ -14,10 +14,15 @@ import { broadcastSyncEvent } from './syncNotifier'
  */
 const schedulers = new Map<string, PollScheduler>()
 
-/** 증분 기준점: 마지막 동기화 시각 - 5분 overlap. 폐구간(앱이 꺼진 구간) 변경을 놓치지 않는다. */
-function incrementalSince(db: SyncStateDb, spaceKey: string): string {
-  const last = db.lastSyncedAt(spaceKey)
-  const base = last ? Date.parse(last) : Date.now()
+/**
+ * 증분 기준점 갱신: 직전 'pull 시작 시각' 기준 since를 반환하고 이번 pull 시작을 기록한다.
+ * pull 종료 시각(MAX(synced_at))을 기준으로 쓰면 긴 pull 진행 중 발생한 원격 변경이
+ * 다음 증분 쿼리에서 영구히 누락되므로 시작 시각으로 닫는다(5분 overlap 유지).
+ */
+export function beginIncrementalPull(db: SyncStateDb, spaceKey: string): string {
+  const previous = db.lastPullStartAt(spaceKey) ?? db.lastSyncedAt(spaceKey)
+  const base = previous ? Date.parse(previous) : Date.now()
+  db.recordPullStart(spaceKey, new Date().toISOString())
   return new Date(base - 5 * 60 * 1000).toISOString()
 }
 
@@ -38,12 +43,13 @@ export function startAutoPull(options: {
       return machine.current === 'agent-run' || machine.current === 'pushing'
     },
     onPoll: async () => {
+      const sinceIso = beginIncrementalPull(db, space.key)
       const result = await pullIncremental({
         client,
         space,
         workspaceRoot,
         db,
-        sinceIso: incrementalSince(db, space.key),
+        sinceIso,
       })
 
       // 원격 삭제 대차(F-3): 원격 목록에 없는 로컬 페이지를 tombstone(.sync/trash 이동)
@@ -68,13 +74,19 @@ export function startAutoPull(options: {
         machine.clearDeferredPull()
       }
 
-      if (result.updated.length > 0 || result.skippedDirty.length > 0 || tombstoned > 0) {
+      if (
+        result.updated.length > 0 ||
+        result.skippedDirty.length > 0 ||
+        result.failed.length > 0 ||
+        tombstoned > 0
+      ) {
         broadcastSyncEvent({
           type: 'poll',
           spaceKey: space.key,
           updated: result.updated.length,
           skippedDirty: result.skippedDirty.length,
           tombstoned,
+          failed: result.failed.length,
         })
       }
     },

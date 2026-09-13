@@ -33,10 +33,17 @@ export const ko = {
     conflictCandidates: (count: number) => `충돌 후보 ${count}건`,
     remoteDeleted: '원격에서 삭제됨',
     pull: '가져오기',
-    pullDone: (pages: number, attachments: number, skipped: number, tombstoned: number) =>
+    pullDone: (
+      pages: number,
+      attachments: number,
+      skipped: number,
+      tombstoned: number,
+      failed = 0,
+    ) =>
       `${pages}페이지 · 첨부 ${attachments}건 동기화됨` +
       (skipped > 0 ? ` (로컬 변경 ${skipped}건 보호)` : '') +
-      (tombstoned > 0 ? ` · 원격 삭제 ${tombstoned}건 정리` : ''),
+      (tombstoned > 0 ? ` · 원격 삭제 ${tombstoned}건 정리` : '') +
+      (failed > 0 ? ` · 실패 ${failed}건(재동기화 필요)` : ''),
   },
   chat: {
     placeholder: '에이전트에게 지시하기',
@@ -83,6 +90,10 @@ export const ko = {
     confirmUpload: (count: number) => `선택한 ${count}개 항목을 Confluence에 업로드합니다`,
     uploadConfirm: '업로드 확정',
     deletedAttachment: '원격 첨부 삭제',
+    missing: '로컬 파일 없음',
+    missingCount: (count: number) => `파일 없음 ${count}`,
+    missingHint:
+      '페이지 기록은 있지만 로컬 파일이 사라졌습니다. 업로드 대상에서 제외되며, 삭제가 의도라면 Confluence에서 페이지를 삭제하세요.',
   },
   conflict: {
     title: '충돌이 감지되었습니다',

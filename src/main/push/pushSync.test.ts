@@ -230,3 +230,101 @@ describe('push 동기화 정합', () => {
     db.close()
   })
 })
+
+function jsonResponse(body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status: 200,
+    headers: { 'Content-Type': 'application/json' },
+  })
+}
+
+describe('업로드 루프 중 변경 재검증(P1 TOCTOU)', () => {
+  it('루프 도중 파일이 바뀌면 해당 페이지를 failed로 보고하고 나머지를 중단한다', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'push-mid-'))
+    mkdirSync(join(root, '.sync'), { recursive: true })
+    const relA = 'spaces/DEV/a/index.md'
+    const relB = 'spaces/DEV/b/index.md'
+    const pageFile = (pageId: string): string =>
+      `---\npageId: "${pageId}"\nspaceKey: "DEV"\ntitle: "페이지${pageId}"\nversion: 2\nparentId: null\nurl: "https://acme.atlassian.net/wiki/spaces/DEV/pages/${pageId}"\nupdatedAt: null\nsyncedAt: null\n---\n\n본문 ${pageId}`
+    mkdirSync(join(root, 'spaces/DEV/a'), { recursive: true })
+    mkdirSync(join(root, 'spaces/DEV/b'), { recursive: true })
+    writeFileSync(join(root, relA), pageFile('1001'), 'utf8')
+    writeFileSync(join(root, relB), pageFile('1002'), 'utf8')
+    const db = new SyncStateDb(join(root, '.sync', 'sync-state.db'))
+    for (const [pageId, relPath] of [
+      ['1001', relA],
+      ['1002', relB],
+    ] as const) {
+      db.upsertPage({
+        pageId,
+        spaceKey: 'DEV',
+        path: relPath,
+        title: `페이지${pageId}`,
+        version: 2,
+        parentId: null,
+        contentHash: 'old',
+      })
+    }
+    const snapshot = {
+      capturedAt: new Date().toISOString(),
+      entries: new Map(
+        [relA, relB].map((relPath) => [
+          relPath,
+          { hash: fileHashOf(readFileSync(join(root, relPath), 'utf8')) },
+        ]),
+      ),
+    }
+    let putB = false
+    const client = new ConfluenceClient({
+      baseUrl: 'https://acme.atlassian.net',
+      email: 'dev@acme.io',
+      apiToken: 'tok',
+      sleep: () => Promise.resolve(),
+      fetchImpl: (async (input: Request | string | URL, init?: RequestInit) => {
+        const url = String(input)
+        const method = init?.method ?? 'GET'
+        if (url.includes('/api/v2/pages/1001') && method === 'PUT') {
+          // 첫 페이지 업로드 I/O 사이에 외부 편집기가 B를 수정
+          writeFileSync(
+            join(root, relB),
+            `${readFileSync(join(root, relB), 'utf8')}\n<!-- 외부 편집 -->`,
+            'utf8',
+          )
+          return jsonResponse({ id: '1001', title: '페이지1001', version: { number: 3 } })
+        }
+        if (url.includes('/api/v2/pages/1002') && method === 'PUT') {
+          putB = true
+          return jsonResponse({ id: '1002', title: '페이지1002', version: { number: 3 } })
+        }
+        const match = /\/api\/v2\/pages\/(\d+)/.exec(url)
+        if (match) {
+          return jsonResponse({
+            id: match[1],
+            title: `페이지${match[1]}`,
+            version: { number: 2 },
+            body: { storage: { value: '<p>원격</p>' } },
+          })
+        }
+        if (url.includes('/child/attachment')) return jsonResponse({ results: [] })
+        return jsonResponse({})
+      }) as unknown as typeof fetch,
+    })
+
+    const outcome = await pushApprovedPages({
+      client,
+      workspaceRoot: root,
+      db,
+      machine: new SpaceStateMachine(),
+      snapshot,
+      approvedPaths: [relA, relB],
+      spaceId: 'sp-1',
+    })
+
+    expect(outcome.uploaded.map((item) => item.path)).toEqual([relA])
+    expect(outcome.failed).toEqual([
+      { path: relB, error: '업로드 도중 파일이 변경되었습니다. 다시 검토(diff)하고 승인하세요.' },
+    ])
+    expect(putB).toBe(false)
+    db.close()
+  })
+})

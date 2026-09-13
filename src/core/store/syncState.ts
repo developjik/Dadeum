@@ -85,6 +85,10 @@ export class SyncStateDb {
         created_at TEXT NOT NULL,
         confirmed_page_id TEXT
       );
+      CREATE TABLE IF NOT EXISTS pull_log (
+        space_key TEXT PRIMARY KEY,
+        started_at TEXT NOT NULL
+      );
     `)
   }
 
@@ -162,6 +166,23 @@ export class SyncStateDb {
       .prepare('SELECT MAX(synced_at) AS last FROM pages WHERE space_key = ?')
       .get(spaceKey) as { last?: string | null }
     return row.last ?? null
+  }
+
+  /** 스페이스의 마지막 'pull 시작 시각' — 증분 기준점(진행 중 변경 유실 방지). */
+  lastPullStartAt(spaceKey: string): string | null {
+    const row = this.db
+      .prepare('SELECT started_at FROM pull_log WHERE space_key = ?')
+      .get(spaceKey) as { started_at?: string | null } | undefined
+    return row?.started_at ?? null
+  }
+
+  recordPullStart(spaceKey: string, startedAt: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO pull_log (space_key, started_at) VALUES (?, ?)
+         ON CONFLICT(space_key) DO UPDATE SET started_at = excluded.started_at`,
+      )
+      .run(spaceKey, startedAt)
   }
 
   deleteAttachment(pageId: string, fileName: string): void {

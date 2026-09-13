@@ -19,7 +19,7 @@ export CONFLUENCE_BASE_URL="https://<test-site>.atlassian.net"
 export CONFLUENCE_EMAIL="you@example.com"
 export CONFLUENCE_API_TOKEN="ATATT..."
 export CONFLUENCE_TEST_SPACE_KEY="E2E"      # 테스트 스페이스 키
-npx tsx scripts/golden-pass.ts
+pnpm exec tsx scripts/golden-pass.ts
 ```
 
 스크립트 단계(스펙 ef-11 순서):

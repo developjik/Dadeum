@@ -951,6 +951,13 @@ a {
   background: var(--c-bg-panel);
 }
 
+.cs-item__hint {
+  margin: 6px 0 0 32px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--c-text-2);
+}
+
 .cs-item__row {
   display: flex;
   align-items: center;

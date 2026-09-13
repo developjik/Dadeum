@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { AgentRunEvent } from '../../../core/agent/types'
 import type { ConfluenceSpace } from '../../../core/confluence/types'
 import { ko } from '../../../core/i18n/ko'
+import { renderPreviewHtml } from '../../../core/preview/render'
 import type { ChangeSet } from '../../../core/push/changeSet'
 import type { LineChange } from '../../../core/push/diff'
 import type { PushOutcome } from '../../../core/push/types'
@@ -24,6 +25,7 @@ interface SyncPollEvent {
   updated: number
   skippedDirty: number
   tombstoned: number
+  failed?: number
 }
 
 interface AppUiState {
@@ -77,6 +79,8 @@ async function api<T>(channel: string, payload?: unknown): Promise<T> {
 let agentUnsubscribe: (() => void) | null = null
 let syncUnsubscribe: (() => void) | null = null
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
+/** openPage 응답 경쟁 가드 — 마지막 선택만 화면에 반영한다. */
+let openPageSeq = 0
 
 function showNotice(message: string): void {
   if (noticeTimer) clearTimeout(noticeTimer)
@@ -118,11 +122,12 @@ export function ensureAgentEventSubscription(): void {
         appendSystemMessage(`${ko.chat.toolPrefix}: ${event.name}`)
       } else if ('type' in event && event.type === 'terminal') {
         useAppStore.setState({ agentRunning: false, activeRunId: undefined })
+        // 비활성 스페이스 런의 changeset으로 현재 검토 화면을 덮어쓰지 않는다(스페이스 간 오염 방지)
         if (isActiveSpace) {
           appendSystemMessage(`${ko.chat.terminalPrefix} ${event.state}`)
+          // 편집이 끝났으면 해당 스페이스의 변경 세트를 자동으로 다시 검사한다
+          void useAppStore.getState().loadChangeset(payload.spaceKey)
         }
-        // 편집이 끝났으면 해당 스페이스의 변경 세트를 자동으로 다시 검사한다
-        void useAppStore.getState().loadChangeset(payload.spaceKey)
       } else if ('type' in event && event.type === 'error' && isActiveSpace) {
         appendSystemMessage(`${ko.chat.errorPrefix} ${event.message}`)
       }
@@ -137,8 +142,15 @@ export function ensureAgentEventSubscription(): void {
       // 백그라운드 동기화 결과를 트리·충돌 후보에 즉시 반영
       void state.loadTree(event.spaceKey)
       void state.loadConflicts(event.spaceKey)
-      if (event.updated > 0 || event.skippedDirty > 0 || event.tombstoned > 0) {
-        showNotice(ko.sync.pullDone(event.updated, 0, event.skippedDirty, event.tombstoned))
+      if (
+        event.updated > 0 ||
+        event.skippedDirty > 0 ||
+        (event.failed ?? 0) > 0 ||
+        event.tombstoned > 0
+      ) {
+        showNotice(
+          ko.sync.pullDone(event.updated, 0, event.skippedDirty, event.tombstoned, event.failed),
+        )
       }
     })
   }
@@ -238,9 +250,16 @@ export const useAppStore = create<AppUiState>((set, get) => ({
         attachments: number
         skippedDirty: number
         tombstoned: number
+        failed?: Array<{ pageId: string; title: string; error: string }>
       }>('spaces:pull', { spaceKey })
       showNotice(
-        ko.sync.pullDone(result.pages, result.attachments, result.skippedDirty, result.tombstoned),
+        ko.sync.pullDone(
+          result.pages,
+          result.attachments,
+          result.skippedDirty,
+          result.tombstoned,
+          result.failed?.length ?? 0,
+        ),
       )
       await get().selectSpace(spaceKey)
     } catch (cause) {
@@ -252,10 +271,22 @@ export const useAppStore = create<AppUiState>((set, get) => ({
 
   selectSpace: async (spaceKey) => {
     ensureAgentEventSubscription()
-    set({ activeSpaceKey: spaceKey, chatMessages: [], selected: null })
+    // 이전 스페이스에서 진행 중이던 미리보기 렌더 무효화
+    openPageSeq++
+    // 검토 상태는 스페이스에 귀속 — 잔류 시 이전 스페이스 변경을 새 스페이스로 오승인할 수 있다
+    set({
+      activeSpaceKey: spaceKey,
+      chatMessages: [],
+      selected: null,
+      changeset: null,
+      pushOutcome: null,
+      diffs: {},
+    })
     await get().loadTree(spaceKey)
     // 충돌 탭 배지를 최신으로 유지
     void get().loadConflicts(spaceKey)
+    // 검토 탭도 스페이스 전환 시 새로 불러온다(잔류 데이터 오승인 방지)
+    void get().loadChangeset(spaceKey)
   },
 
   sendChat: async (prompt) => {
@@ -352,17 +383,20 @@ export const useAppStore = create<AppUiState>((set, get) => ({
   },
 
   openPage: async (path) => {
+    const seq = ++openPageSeq
     try {
       const result = await api<{ title: string; url: string; version: number; markdown: string }>(
         'pages:read',
         { path },
       )
-      const { renderPreviewHtml } = await import('../../../core/preview/render')
       const html = await renderPreviewHtml(result.markdown)
+      // 이후 선택(또는 스페이스 전환)이 발생한 늦은 응답은 폐기한다
+      if (seq !== openPageSeq) return
       set({
         selected: { path, title: result.title, url: result.url, version: result.version, html },
       })
     } catch (cause) {
+      if (seq !== openPageSeq) return
       set({ error: String(cause instanceof Error ? cause.message : cause) })
     }
   },

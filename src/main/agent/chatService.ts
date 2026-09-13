@@ -85,4 +85,9 @@ export class ChatRunService {
       if (runSpace === spaceKey) handle.cancel()
     }
   }
+
+  /** 앱 종료(will-quit) 시 실행 중인 모든 런을 취소한다 — detached 고아 프로세스 방지. */
+  cancelAll(): void {
+    for (const { handle } of this.activeRuns.values()) handle.cancel()
+  }
 }

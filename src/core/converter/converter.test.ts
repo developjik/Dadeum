@@ -167,3 +167,41 @@ describe('멱등성(md → storage → md)', () => {
     expect(md2).toBe(md1)
   })
 })
+
+describe('왕복 하드닝 2(P1 — 다중 에이전트 리뷰)', () => {
+  it('코드 내용에 ``` 라인이 있으면 펜스가 길어져 조기 닫히지 않는다', () => {
+    const storage = '<pre><code>before\n```\nafter</code></pre>'
+    const { markdown } = storageToMarkdown(storage)
+    expect(markdown).toBe('````\nbefore\n```\nafter\n````')
+    expectRoundTripLossless(storage)
+  })
+
+  it('캐리어 내용의 백틱 런보다 펜스가 길다', () => {
+    const macro =
+      '<ac:structured-macro ac:name="x"><ac:parameter ac:name="k">a```b</ac:parameter></ac:structured-macro>'
+    const { markdown } = storageToMarkdown(macro)
+    expect(markdown).toContain('````confluence-storage name=structured-macro')
+    expect(markdownToStorage(markdown)).toContain('a```b')
+  })
+
+  it('중첩 표의 행이 외부 표에 유령 행으로 병합되지 않는다', () => {
+    const outer =
+      '<table><tbody><tr><th>이름</th><th>값</th></tr><tr><td>외부</td><td><table><tbody><tr><td>중첩</td><td>1</td></tr></tbody></table></td></tr></tbody></table>'
+    expectRoundTripLossless(outer)
+  })
+
+  it('병합 셀(colspan) 표는 캐리어로 verbatim 보존된다', () => {
+    const storage =
+      '<table><tbody><tr><th colspan="2">제목</th></tr><tr><td>a</td><td>b</td></tr></tbody></table>'
+    const { markdown } = storageToMarkdown(storage)
+    expect(markdown).toContain('```confluence-storage name=table')
+    expect(markdown).toContain('colspan="2"')
+    expect(markdownToStorage(markdown)).toContain('colspan="2"')
+  })
+
+  it('문단의 --- / === 라인이 hr·setext 제목으로 변질되지 않는다', () => {
+    expect(storageToMarkdown('<p>---</p>').markdown).toBe('\\---')
+    expectRoundTripLossless('<p>---</p>')
+    expectRoundTripLossless('<p>윗줄<br/>===</p>')
+  })
+})
