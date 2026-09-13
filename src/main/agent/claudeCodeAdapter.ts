@@ -100,6 +100,8 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     let cancelled = false
     let timedOut = false
     let settled = false
+    // result 레코드가 실행 실패(is_error)를 보고하면 close code와 무관하게 error로 종단한다
+    let resultError = false
     let activeChild: AgentProcess | null = null
     let timer: ReturnType<typeof setTimeout> | undefined
     /** 프로세스 그룹 단위 종료 — cancel·타임아웃·출력 폭주가 동일 범위를 정리하게 한다. */
@@ -162,8 +164,10 @@ export class ClaudeCodeAdapter implements AgentAdapter {
 
       timer = setTimeout(() => {
         timedOut = true
-        // cancel과 동일하게 프로세스 그룹 전체를 죽린다(detached 손자 잔존 방지)
-        killTree('SIGKILL')
+        // cancel과 동일하게 SIGTERM → 2초 후 SIGKILL. 즉시 SIGKILL하면 CLI가
+        // 편집 중이던 파일을 반쯤 쓴 상태로 남길 수 있다(정리 기회를 준다).
+        killTree('SIGTERM')
+        setTimeout(() => killTree('SIGKILL'), 2000)
       }, request.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS)
 
       // 바이너리 부재·cwd 부재 등은 'error' 이벤트로만 arrive하고 close가 오지 않는다.
@@ -188,7 +192,10 @@ export class ClaudeCodeAdapter implements AgentAdapter {
         const lines = lineBuffer.split('\n')
         lineBuffer = lines.pop() ?? ''
         for (const line of lines) {
-          for (const event of parseStreamJsonLine(line)) emit(event)
+          for (const event of parseStreamJsonLine(line)) {
+            if (event.type === 'result' && event.isError) resultError = true
+            emit(event)
+          }
         }
       })
       child.stderr.setEncoding('utf8')
@@ -199,12 +206,16 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       child.on('close', (code: number | null) => {
         // 잔여 버퍼 플러시(마지막 줄이 개행 없이 끝나는 경우)
         if (lineBuffer.trim().length > 0) {
-          for (const event of parseStreamJsonLine(lineBuffer)) emit(event)
+          for (const event of parseStreamJsonLine(lineBuffer)) {
+            if (event.type === 'result' && event.isError) resultError = true
+            emit(event)
+          }
           lineBuffer = ''
         }
+        // result 레코드가 실행 실패를 보고했으면 exit code 0이어도 error로 종단한다
         if (cancelled) settle('cancelled')
         else if (timedOut) settle('timeout')
-        else if (code === 0) settle('completed')
+        else if (code === 0 && !resultError) settle('completed')
         else settle('error')
       })
     })

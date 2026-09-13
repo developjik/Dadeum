@@ -26,16 +26,6 @@ export interface AttachmentRecord {
   syncedAt: string
 }
 
-export interface PendingCreateRecord {
-  journalId: number
-  spaceKey: string
-  parentId: string | null
-  localPath: string
-  title: string
-  createdAt: string
-  confirmedPageId: string | null
-}
-
 export class SyncStateDb {
   private readonly db: BetterSqlite3.Database
 
@@ -76,15 +66,6 @@ export class SyncStateDb {
         updated_at TEXT NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS pending_creates (
-        journal_id INTEGER PRIMARY KEY AUTOINCREMENT,
-        space_key TEXT NOT NULL,
-        parent_id TEXT,
-        local_path TEXT NOT NULL,
-        title TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        confirmed_page_id TEXT
-      );
       CREATE TABLE IF NOT EXISTS pull_log (
         space_key TEXT PRIMARY KEY,
         started_at TEXT NOT NULL
@@ -247,33 +228,6 @@ export class SyncStateDb {
       fileHash: row.file_hash,
       syncedAt: row.synced_at,
     }))
-  }
-
-  recordPendingCreate(
-    spaceKey: string,
-    parentId: string | null,
-    localPath: string,
-    title: string,
-  ): number {
-    const result = this.db
-      .prepare(
-        `INSERT INTO pending_creates (space_key, parent_id, local_path, title, created_at)
-         VALUES (?, ?, ?, ?, ?)`,
-      )
-      .run(spaceKey, parentId, localPath, title, new Date().toISOString())
-    return Number(result.lastInsertRowid)
-  }
-
-  confirmPendingCreate(journalId: number, pageId: string): void {
-    this.db
-      .prepare('UPDATE pending_creates SET confirmed_page_id = ? WHERE journal_id = ?')
-      .run(pageId, journalId)
-  }
-
-  listUnconfirmedCreates(): PendingCreateRecord[] {
-    return this.db
-      .prepare('SELECT * FROM pending_creates WHERE confirmed_page_id IS NULL')
-      .all() as unknown as PendingCreateRecord[]
   }
 
   /** ChatSession(스페이스 스코프) ↔ 에이전트 세션 id 1:1 매핑(계획 §8.5). */

@@ -274,6 +274,13 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
               <span className="outcome-row__detail">{ko.review.deletedAttachment}</span>
             </div>
           ))}
+          {pushOutcome.skippedRemoteAttachments.map((item) => (
+            <div key={item.path} className="outcome-row outcome-row--neutral">
+              <AlertIcon size={14} />
+              <span className="outcome-row__path">{item.fileName}</span>
+              <span className="outcome-row__detail">{ko.review.skippedRemoteAttachment}</span>
+            </div>
+          ))}
           {pushOutcome.failed.map((item) => (
             <div key={item.path} className="outcome-row outcome-row--danger" role="alert">
               <AlertIcon size={14} />

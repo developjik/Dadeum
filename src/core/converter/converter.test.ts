@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { verifyCarrierIntegrity } from './carriers'
+import { contentHash, verifyCarrierIntegrity } from './carriers'
 import { storageSemanticallyEqual } from './compare'
 import { markdownToStorage } from './markdownToStorage'
 import { storageToMarkdown } from './storageToMarkdown'
@@ -88,9 +88,19 @@ describe('markdownToStorage', () => {
     const macro =
       '<ac:structured-macro ac:name="status"><ac:parameter ac:name="colour">Green</ac:parameter></ac:structured-macro>'
     const storage = markdownToStorage(
-      `\`\`\`confluence-storage name=structured-macro id=deadbeef\n${macro}\n\`\`\``,
+      `\`\`\`confluence-storage name=structured-macro id=${contentHash(macro)}\n${macro}\n\`\`\``,
     )
     expect(storage).toContain('<ac:parameter ac:name="colour">Green</ac:parameter>')
+  })
+
+  it('변조된 캐리어 펜스는 무결성 검증 실패로 재주입을 거부한다', () => {
+    const original = '<ac:structured-macro ac:name="status"></ac:structured-macro>'
+    const tampered = '<ac:structured-macro ac:name="evil"></ac:structured-macro>'
+    expect(() =>
+      markdownToStorage(
+        `\`\`\`confluence-storage name=structured-macro id=${contentHash(original)}\n${tampered}\n\`\`\``,
+      ),
+    ).toThrow(/무결성/)
   })
   it('loose 목록 항목(문단 2개)이 불법 XML을 만들지 않는다', () => {
     expect(markdownToStorage('- 첫 문단\n\n  둘째 문단')).toBe(

@@ -35,7 +35,12 @@ export function parseStreamJsonLine(line: string): AgentRunEvent[] {
     return events
   }
   if (record.type === 'result') {
-    return [] // 종단 상태는 프로세스 close가 담당
+    // 종단 상태는 프로세스 close가 담당하되, 실행 실패 여부(is_error / error_* subtype)와
+    // 최종 사유는 이벤트로 전달한다 — close code 0으로 끝난 실패를 'completed'로 못 박게 두지 않는다.
+    const subtype = typeof record.subtype === 'string' ? record.subtype : undefined
+    const isError = record.is_error === true || (subtype?.startsWith('error') ?? false)
+    const value = typeof record.result === 'string' ? record.result : undefined
+    return [{ type: 'result', isError, subtype, value }]
   }
   return []
 }

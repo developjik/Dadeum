@@ -35,6 +35,7 @@ export async function pushApprovedPages(options: {
     remoteDeleted: [],
     failed: [],
     deletedAttachments: [],
+    skippedRemoteAttachments: [],
   }
 
   // 1차 가드: 상태머신(agent-run/pulling/pushing 중 금지 — F-2)
@@ -296,13 +297,23 @@ async function pushOne(
       })
     }
 
-    // 첨부 삭제 동기화: 로컬에 없는 원격 첨부를 정리한다(로컬 첨부 디렉터리가 관리 중일 때만)
+    // 첨부 삭제 동기화: 'db가 과거에 동기화한 첨부'가 로컬에서 사라졌을 때만 원격에서 정리한다.
+    // 한 번도 내려받은 적 없는 원격 첨부(첨부는 페이지 버전을 올리지 않아 버전 게이트가
+    // 못 잡는다)를 지우면 사용자가 본 적도 없는 데이터가 영구 삭제된다 — 보존하고 결과에 보고.
+    const knownRecords = db.listAttachmentsByPage(meta.pageId)
     const localNames = new Set(
       readdirSync(attachmentsDir, { withFileTypes: true }).map((e) => e.name),
     )
     const remoteAttachments = await client.listAttachments(meta.pageId)
     for (const remote of remoteAttachments) {
       if (localNames.has(remote.fileName)) continue
+      if (!knownRecords.some((record) => record.fileName === remote.fileName)) {
+        outcome.skippedRemoteAttachments.push({
+          path: relPath.replace(/index\.md$/, `attachments/${remote.fileName}`),
+          fileName: remote.fileName,
+        })
+        continue
+      }
       await client.deleteAttachment(remote.id)
       db.deleteAttachment(meta.pageId, remote.fileName)
       outcome.deletedAttachments.push({

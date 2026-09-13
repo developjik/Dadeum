@@ -85,7 +85,13 @@ describe('selectSpace 검토 상태 리셋', () => {
     useAppStore.setState({
       activeSpaceKey: 'A',
       changeset: { modified: [{ path: 'a' }] } as unknown as ChangeSet,
-      pushOutcome: { uploaded: [], failed: [], conflicts: [] } as unknown as PushOutcome,
+      pushOutcome: {
+        uploaded: [],
+        failed: [],
+        conflicts: [],
+        deletedAttachments: [],
+        skippedRemoteAttachments: [],
+      } as unknown as PushOutcome,
       diffs: { 'spaces/A/x/index.md': [] },
     })
 

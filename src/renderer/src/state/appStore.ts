@@ -45,6 +45,10 @@ interface AppUiState {
   chatMessages: Array<{ role: 'user' | 'assistant' | 'system'; text: string }>
   agentRunning: boolean
   activeRunId?: string
+  /** agent:run IPC 왕복이 진행 중이다(왕복 내 중지 요청은 플래그로 큐잉). */
+  agentStarting: boolean
+  /** 시작 왕복 중 눌린 중지 — runId 수령 즉시 agent:cancel로 소비한다. */
+  agentStartAborted: boolean
   changeset: ChangeSet | null
   pushOutcome: PushOutcome | null
   conflicts: Array<{ pageId: string; path: string; reason: 'remote-deleted' | 'dirty' }>
@@ -160,8 +164,20 @@ export function ensureAgentEventSubscription(): void {
         useAppStore.setState({ chatMessages: messages })
       } else if ('type' in event && event.type === 'tool' && isActiveSpace) {
         appendSystemMessage(`${ko.chat.toolPrefix}: ${event.name}`)
+      } else if ('type' in event && event.type === 'result' && isActiveSpace) {
+        // CLI 최종 result 레코드 — 성공 요약은 스트리밍 텍스트와 중복되니 표시하지 않고,
+        // 실패(is_error/error_* subtype)만 사용자에게 보여 실패 원인을 감추지 않는다.
+        if (event.isError) {
+          const reason = event.value ?? event.subtype ?? ko.chat.agentFailed
+          appendSystemMessage(`${ko.chat.errorPrefix} ${reason}`)
+        }
       } else if ('type' in event && event.type === 'terminal') {
-        useAppStore.setState({ agentRunning: false, activeRunId: undefined })
+        useAppStore.setState({
+          agentRunning: false,
+          activeRunId: undefined,
+          agentStarting: false,
+          agentStartAborted: false,
+        })
         // 비활성 스페이스 런의 changeset으로 현재 검토 화면을 덮어쓰지 않는다(스페이스 간 오염 방지)
         if (isActiveSpace) {
           appendSystemMessage(`${ko.chat.terminalPrefix} ${event.state}`)
@@ -214,6 +230,8 @@ export const useAppStore = create<AppUiState>((set, get) => ({
   busy: false,
   chatMessages: [],
   agentRunning: false,
+  agentStarting: false,
+  agentStartAborted: false,
   changeset: null,
   pushOutcome: null,
   diffs: {},
@@ -353,12 +371,27 @@ export const useAppStore = create<AppUiState>((set, get) => ({
     set({
       chatMessages: [...get().chatMessages, { role: 'user', text: prompt }],
       agentRunning: true,
+      agentStarting: true,
     })
     try {
       const { runId } = await api<{ runId: string }>('agent:run', { spaceKey, prompt })
-      set({ activeRunId: runId })
+      set({ activeRunId: runId, agentStarting: false })
+      // 시작 왕복 중 중지가 요청됐다 — runId를 받은 지금 즉시 취소한다(사전-시작 취소 큐).
+      if (get().agentStartAborted) {
+        set({ agentStartAborted: false })
+        try {
+          await api('agent:cancel', { runId })
+        } catch {
+          // 시작 직후 취소 실패는 런 종료(terminal) 이벤트가 수습한다
+        }
+      }
     } catch (cause) {
-      set({ agentRunning: false, error: String(cause instanceof Error ? cause.message : cause) })
+      set({
+        agentRunning: false,
+        agentStarting: false,
+        agentStartAborted: false,
+        error: String(cause instanceof Error ? cause.message : cause),
+      })
     }
   },
 
@@ -426,7 +459,12 @@ export const useAppStore = create<AppUiState>((set, get) => ({
   cancelAgent: async () => {
     const runId = get().activeRunId
     if (!runId) {
-      // 시작 IPC 왕복 전 중지 요청 — 조용히 무시하지 않고 안내한다
+      // 시작 IPC 왕복 전/중 중지 요청 — 왕복 중이면 큐잉하고 runId 수령 즉시 취소한다
+      if (get().agentStarting) {
+        set({ agentStartAborted: true })
+        showNotice(ko.chat.cancelQueued)
+        return
+      }
       showNotice(ko.chat.cancelPending)
       return
     }

@@ -2,7 +2,7 @@ import type { List, PhrasingContent, Root, RootContent } from 'mdast'
 import remarkGfm from 'remark-gfm'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
-import { CARRIER_LANG, INLINE_REF_PREFIX, INLINE_REF_SUFFIX } from './carriers'
+import { CARRIER_LANG, contentHash, INLINE_REF_PREFIX, INLINE_REF_SUFFIX } from './carriers'
 import { escapeStorageAttr, escapeStorageText } from './xml'
 
 interface CarrierRegistry {
@@ -15,11 +15,22 @@ export function markdownToStorage(markdown: string): string {
   const tree = unified().use(remarkParse).use(remarkGfm).parse(markdown) as Root
 
   // 캐리어 레지스트리: 펜스 전체를 미리 수집(인라인 ref 재주입용).
+  // 수집 시점에 해시 무결성을 검증한다(carriers.ts 규약 — "push 시 해시로 무결성을 재확인").
+  // 사용자가 펜스 내용을 수정했다면 재주입을 거부해 변질된 XML이 원격에 올라가는 것을 막는다.
   const ctx: CarrierRegistry = { carriers: new Map(), emitted: new Set() }
   for (const node of tree.children) {
     if (node.type === 'code' && node.lang === CARRIER_LANG) {
       const id = carrierId(node.meta)
-      if (id) ctx.carriers.set(id, { name: carrierName(node.meta), content: node.value })
+      if (id) {
+        if (contentHash(node.value) !== id) {
+          throw new Error(
+            `캐리어 무결성 검증 실패(name=${carrierName(node.meta)}, id=${id}). ` +
+              '펜스 블록(confluence-storage)의 내용이 원본과 다릅니다. 원본 그대로 복원하거나, ' +
+              '내용을 바꾸려면 펜스를 지우고 일반 마크다운으로 다시 작성하세요.',
+          )
+        }
+        ctx.carriers.set(id, { name: carrierName(node.meta), content: node.value })
+      }
     }
   }
 

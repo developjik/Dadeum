@@ -50,8 +50,10 @@ export const ko = {
     send: '보내기',
     cancel: '에이전트 중지',
     cancelPending: '에이전트 시작 중입니다. 잠시 후 다시 중지하세요.',
+    cancelQueued: '에이전트 시작이 완료되는 대로 중지합니다.',
     terminalPrefix: '에이전트 종료:',
     errorPrefix: '오류:',
+    agentFailed: '에이전트 실행이 실패했습니다',
     title: '에이전트',
     empty: '에이전트에게 문서 작업을 지시해 보세요',
     toolPrefix: '도구 실행',
@@ -86,6 +88,7 @@ export const ko = {
     confirmUpload: (count: number) => `선택한 ${count}개 항목을 Confluence에 업로드합니다`,
     uploadConfirm: '업로드 확정',
     deletedAttachment: '원격 첨부 삭제',
+    skippedRemoteAttachment: '원격에만 있는 첨부 — 로컬 미동기화, 삭제하지 않았음',
     missing: '로컬 파일 없음',
     missingCount: (count: number) => `파일 없음 ${count}`,
     missingHint:

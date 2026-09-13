@@ -91,21 +91,6 @@ describe('SyncStateDb', () => {
     expect(list[0]?.fileHash).toBe('f2')
   })
 
-  it('pending-create 저널은 기록→확정 흐름을 가진다', () => {
-    const db = freshDb()
-    const journalId = db.recordPendingCreate(
-      'DEV',
-      null,
-      'spaces/DEV/새페이지/index.md',
-      '새페이지',
-    )
-    expect(db.listUnconfirmedCreates()).toHaveLength(1)
-
-    db.confirmPendingCreate(journalId, '777')
-    expect(db.listUnconfirmedCreates()).toHaveLength(0)
-    expect(db.getPage('777')).toBeNull() // 확정은 페이지 레코드와 별개
-  })
-
   it('2^53 초과 pageId도 문자열로 무손실 보관한다', () => {
     const db = freshDb()
     const bigId = '9007199254740993'

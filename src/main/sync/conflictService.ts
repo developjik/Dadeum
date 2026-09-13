@@ -79,48 +79,63 @@ export async function resolveConflict(options: {
   }
 
   if (choice === 'take-remote') {
-    const remote = await client.getPageStorage(pageId)
-    const markdown = storageToMarkdown(remote.storageValue).markdown
-    const ts = new Date().toISOString().replace(/[:.]/g, '-')
-    let backupPath: string | undefined
-    if (existsSync(absPath)) {
-      backupPath = join(
-        workspaceRoot,
-        '.sync',
-        'trash',
-        ts,
-        safePath.replace(/\/index\.md$/, '.local-backup.md'),
+    // 폴링 pull·push와 같은 index.md/db를 두고 경합하지 않게 머신 락을 취득한다
+    // (overwrite와 동일 보호 — take-remote도 파일·db를 다시 쓰는 원격 조작이다).
+    const started = machine.apply('startPush')
+    if (!started.ok) throw new Error('에이전트 실행 중이거나 동기화 중이라 처리할 수 없습니다')
+    try {
+      const remote = await client.getPageStorage(pageId)
+      const markdown = storageToMarkdown(remote.storageValue).markdown
+      const ts = new Date().toISOString().replace(/[:.]/g, '-')
+      let backupPath: string | undefined
+      if (existsSync(absPath)) {
+        backupPath = join(
+          workspaceRoot,
+          '.sync',
+          'trash',
+          ts,
+          safePath.replace(/\/index\.md$/, '.local-backup.md'),
+        )
+        mkdirSync(dirname(backupPath), { recursive: true })
+        writeFileSync(backupPath, readFileSync(absPath)) // 로컬 변경 1회 백업(trash는 allowlist 밖)
+      }
+      const baseMeta = currentMeta(absPath)
+      const updatedRaw = renderPageFile(
+        { ...baseMeta, version: remote.version, syncedAt: new Date().toISOString() },
+        markdown,
       )
-      mkdirSync(dirname(backupPath), { recursive: true })
-      writeFileSync(backupPath, readFileSync(absPath)) // 로컬 변경 1회 백업(trash는 allowlist 밖)
+      writeFileSync(absPath, updatedRaw, 'utf8')
+      // db의 version·title도 원격 판으로 갱신 — 옛값이 남으면 트리 표시·버전 검사가 어긋난다
+      db.upsertPage({
+        pageId,
+        spaceKey: baseMeta.spaceKey,
+        path: safePath,
+        title: remote.title || baseMeta.title,
+        version: remote.version,
+        parentId: baseMeta.parentId,
+        contentHash: fileHashOf(updatedRaw),
+        updatedAt: null,
+      })
+      db.clearRemoteDeleted(pageId)
+      return { applied: 'take-remote', backupPath }
+    } finally {
+      machine.apply('endPush')
     }
-    const baseMeta = currentMeta(absPath)
-    const updatedRaw = renderPageFile(
-      { ...baseMeta, version: remote.version, syncedAt: new Date().toISOString() },
-      markdown,
-    )
-    writeFileSync(absPath, updatedRaw, 'utf8')
-    // db의 version·title도 원격 판으로 갱신 — 옛값이 남으면 트리 표시·버전 검사가 어긋난다
-    db.upsertPage({
-      pageId,
-      spaceKey: baseMeta.spaceKey,
-      path: safePath,
-      title: remote.title || baseMeta.title,
-      version: remote.version,
-      parentId: baseMeta.parentId,
-      contentHash: fileHashOf(updatedRaw),
-      updatedAt: null,
-    })
-    db.clearRemoteDeleted(pageId)
-    return { applied: 'take-remote', backupPath }
   }
 
   if (choice === 'manual') {
-    const remote = await client.getPageStorage(pageId)
-    const markdown = storageToMarkdown(remote.storageValue).markdown
-    const remoteFile = absPath.replace(/\.md$/, '.remote.md') // allowlist 제외 — 변경 세트 유입 없음(F3)
-    writeFileSync(remoteFile, markdown, 'utf8')
-    return { applied: 'manual', remoteFile }
+    // 원격 판을 파일로 내려쓰는 조작 — pull과 겹치면 반쪽 원격 판이 생긴다. 동일 락으로 직렬화.
+    const started = machine.apply('startPush')
+    if (!started.ok) throw new Error('에이전트 실행 중이거나 동기화 중이라 처리할 수 없습니다')
+    try {
+      const remote = await client.getPageStorage(pageId)
+      const markdown = storageToMarkdown(remote.storageValue).markdown
+      const remoteFile = absPath.replace(/\.md$/, '.remote.md') // allowlist 제외 — 변경 세트 유입 없음(F3)
+      writeFileSync(remoteFile, markdown, 'utf8')
+      return { applied: 'manual', remoteFile }
+    } finally {
+      machine.apply('endPush')
+    }
   }
 
   throw new Error(`알 수 없는 충돌 처리 선택: ${String(choice)}`)

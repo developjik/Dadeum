@@ -167,15 +167,18 @@ describe('ClaudeCodeAdapter 계약', () => {
     expect(proc.killCalls).toContain('SIGTERM')
   })
 
-  it('타임아웃 시 SIGKILL 후 timeout 종단한다', async () => {
+  it('타임아웃 시 SIGTERM → 2초 후 SIGKILL, timeout 종단한다(부분 쓰기 정리 기회)', async () => {
     vi.useFakeTimers()
     const proc = fakeProcess()
     const adapter = new ClaudeCodeAdapter({ spawnImpl: () => proc })
     const handle = adapter.start({ prompt: 'p', cwd: '/ws', timeoutMs: 50 })
     const promise = expect(handle.terminal).resolves.toBe('timeout')
     vi.advanceTimersByTime(60)
+    // 1단계 SIGTERM: CLI가 진행 중 편집을 안전하게 마무리할 기회
+    expect(proc.killCalls).toContain('SIGTERM')
+    vi.advanceTimersByTime(2000)
     await promise
-    expect(proc.killCalls).toContain('SIGKILL')
+    expect(proc.killCalls).toEqual(['SIGTERM', 'SIGKILL'])
     vi.useRealTimers()
   })
 

@@ -176,12 +176,12 @@ describe('push 동기화 정합', () => {
     db.close()
   })
 
-  it('로컬에서 삭제된 첨부를 원격에서 정리하고 보고한다', async () => {
+  it('동기화 이력 있는 첨부만 원격 정리하고, 미동기 원격 첨부는 보존·보고한다', async () => {
     const root = mkdtempSync(join(tmpdir(), 'push-attach-'))
     mkdirSync(join(root, '.sync'), { recursive: true })
     const relPath = 'spaces/DEV/가이드/index.md'
     writePage(root, relPath, '가이드')
-    // 로컬 첨부는 keep.png 하나(관리 중) — old.png는 로컬에서 삭제된 상태
+    // 로컬 첨부는 keep.png 하나(관리 중) — old.png는 로컬에서 삭제된 상태(과거 동기화 이력 있음)
     mkdirSync(join(root, 'spaces/DEV/가이드/attachments'), { recursive: true })
     writeFileSync(join(root, 'spaces/DEV/가이드/attachments/keep.png'), 'KEEP')
     const db = new SyncStateDb(join(root, '.sync', 'sync-state.db'))
@@ -200,12 +200,21 @@ describe('push 동기화 정합', () => {
       mediaType: 'image/png',
       fileHash: fileHashOf(Buffer.from('KEEP')),
     })
+    // old.png는 과거에 동기화됐다가 로컬에서 삭제 — 원격 정리 대상
+    db.upsertAttachment({
+      pageId: '1001',
+      fileName: 'old.png',
+      mediaType: 'image/png',
+      fileHash: 'previous-hash',
+    })
     const captured: Captured = { deletedIds: [], uploads: [] }
 
     const outcome = await pushApprovedPages({
       client: makeClient(captured, [
         { id: 'att-keep', title: 'keep.png' },
         { id: 'att-old', title: 'old.png' },
+        // unknown.png는 로컬로 한 번도 동기화된 적 없는 원격 첨부
+        { id: 'att-unknown', title: 'unknown.png' },
       ]),
       workspaceRoot: root,
       db,
@@ -218,7 +227,7 @@ describe('push 동기화 정합', () => {
     expect(outcome.failed).toHaveLength(0)
     // keep.png는 해시 동일 → 재업로드 없음
     expect(captured.uploads).toHaveLength(0)
-    // old.png는 원격 삭제 + db 정리 + 보고
+    // old.png(이력 있음·로컬 삭제)만 원격 삭제 + db 정리 + 보고
     expect(captured.deletedIds).toEqual(['att-old'])
     expect(outcome.deletedAttachments).toEqual([
       { path: 'spaces/DEV/가이드/attachments/old.png', fileName: 'old.png' },
@@ -226,6 +235,11 @@ describe('push 동기화 정합', () => {
     expect(db.listAttachmentsByPage('1001').some((record) => record.fileName === 'old.png')).toBe(
       false,
     )
+    // unknown.png(이력 없음)는 삭제하지 않고 보존·보고한다
+    expect(outcome.skippedRemoteAttachments).toEqual([
+      { path: 'spaces/DEV/가이드/attachments/unknown.png', fileName: 'unknown.png' },
+    ])
+    expect(captured.deletedIds).not.toContain('att-unknown')
     expect(existsSync(join(root, 'spaces/DEV/가이드/attachments/keep.png'))).toBe(true)
     db.close()
   })

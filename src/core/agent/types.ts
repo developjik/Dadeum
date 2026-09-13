@@ -7,8 +7,14 @@ export type AgentRunEvent =
   | { type: 'text'; value: string }
   | { type: 'tool'; name: string }
   | { type: 'error'; message: string }
+  | {
+      /** CLI 최종 result 레코드 — close 코드와 무관한 실행 실패(is_error)를 운반한다. */
+      type: 'result'
+      isError: boolean
+      subtype?: string
+      value?: string
+    }
   | { type: 'terminal'; state: 'completed' | 'cancelled' | 'timeout' | 'error' }
-
 export type AgentTerminalState = 'completed' | 'cancelled' | 'timeout' | 'error'
 
 export interface AgentRunRequest {
