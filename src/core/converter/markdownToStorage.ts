@@ -95,14 +95,23 @@ function convertRootContent(node: RootContent, ctx: CarrierRegistry): string {
       return '<hr/>'
     case 'table': {
       const [header, ...body] = node.children
+      // GFM 구분자 행의 정렬(node.align)을 th/td의 align 속성으로 반영한다.
+      // storage→markdown 방향은 같은 열의 정렬이 일치할 때만 구분자 행으로
+      // 내보내므로(불일치 시 캐리어 승격) 이 조합은 왕복 무손실이다.
+      const alignAttr = (index: number): string => {
+        const align = node.align?.[index]
+        return align ? ` align="${align}"` : ''
+      }
       const headerCells =
         header?.children
-          .map((cell) => `<th>${convertPhrasing(cell.children, ctx)}</th>`)
+          .map(
+            (cell, index) => `<th${alignAttr(index)}>${convertPhrasing(cell.children, ctx)}</th>`,
+          )
           .join('') ?? ''
       const bodyRows = body
         .map(
           (row) =>
-            `<tr>${row.children.map((cell) => `<td>${convertPhrasing(cell.children, ctx)}</td>`).join('')}</tr>`,
+            `<tr>${row.children.map((cell, index) => `<td${alignAttr(index)}>${convertPhrasing(cell.children, ctx)}</td>`).join('')}</tr>`,
         )
         .join('')
       return `<table><tbody><tr>${headerCells}</tr>${bodyRows}</tbody></table>`
@@ -173,13 +182,17 @@ function convertPhrasingNode(node: PhrasingContent, ctx: CarrierRegistry): strin
     case 'image':
       return `<img src="${escapeStorageAttr(node.url)}" alt="${escapeStorageAttr(node.alt ?? '')}"/>`
     case 'html': {
-      // sub/sup 등 서식 태그만 verbatim 통과. script/iframe·이벤트 핸들러는 제거
-      // (storage는 HTML이므로 정화 없이 넣으면 Confluence 열람자에게 XSS 가능)
-      const value = node.value
+      // 무해한 서식 태그(sub/sup/u/kbd)와 br만 verbatim 통과. script·이벤트 핸들러는
+      // 제거한다(storage는 HTML이므로 정화 없이 넣으면 Confluence 열람자에게 XSS 가능).
+      // 그 외 인라인 HTML은 리터럴 텍스트로 이스케이프한다(원문이 문자열로 보존됨).
+      // remark는 태그 하나를 html 노드 하나로 파싱하므로 전체 일치로 판정한다.
+      const sanitized = node.value
+        .trim()
         .replace(/<script[\s\S]*?<\/script>/gi, '')
         .replace(/\son\w+\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi, '')
-      if (/<\/?\s*(sub|sup)\b/i.test(value)) return value
-      return escapeStorageText(value)
+      if (/^<\s*br\s*\/?\s*>$/i.test(sanitized)) return '<br/>'
+      if (/^<\s*\/?\s*(sub|sup|u|kbd)\b[^>]*>$/i.test(sanitized)) return sanitized
+      return escapeStorageText(sanitized)
     }
     default: {
       const children = 'children' in node ? (node.children as PhrasingContent[]) : []

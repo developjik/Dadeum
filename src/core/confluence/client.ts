@@ -161,6 +161,10 @@ export class ConfluenceClient {
       if (response.status === 404) {
         throw new ConfluenceApiError('not_found', '대상을 찾을 수 없습니다(404)', 404)
       }
+      if (response.status === 409) {
+        // 사전 GET 버전 검사와 PUT 사이에 원격이 바뀐 경우 — 충돌 해결로 보내야 한다.
+        throw new ConfluenceApiError('conflict', '원격에서 문서가 변경되었습니다(409)', 409)
+      }
       if (response.status >= 500) {
         lastError = new ConfluenceApiError(
           'server',
@@ -445,6 +449,18 @@ export class ConfluenceClient {
       title: body.title,
       version: Number(body.version?.number ?? 0),
     }
+  }
+
+  /**
+   * 페이지 콘텐츠 속성 설정(v2). REST로 생성한 페이지는 legacy editor로 취급될 수
+   * 있는데, 이 경우 사용자가 브라우저에서 저장할 때 첨부 참조가 UNKNOWN_ATTACHMENT로
+   * 재작성되는 결함이 알려져 있다 — editor=v2 속성으로 새 편집기 취급을 보장한다.
+   */
+  async setPageContentProperty(pageId: string, key: string, value: string): Promise<void> {
+    await this.requestJson<unknown>(`/api/v2/pages/${pageId}/content-properties`, {
+      method: 'POST',
+      body: JSON.stringify({ key, value }),
+    })
   }
 
   /**

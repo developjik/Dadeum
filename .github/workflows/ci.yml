@@ -44,6 +44,49 @@ jobs:
       - name: Build (electron-vite)
         run: pnpm build
 
+  packaging-smoke:
+    name: Packaging smoke (${{ matrix.os }})
+    # 릴리스 태그에서만 돌던 electron-builder·afterPack(fuses·prebuilds 정리) 경로를
+    # PR마다 검증한다 — 패키징 전용 런타임 버그(예: afterPack의 미정의 심볼)를
+    # 릴리스 전에 잡는다. 의도적으로 무서명 --dir 패키징만 한다(publish 없음).
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build (electron-vite)
+        run: pnpm build
+
+      - name: Package (electron-builder --dir, afterPack fuses 포함)
+        run: npx electron-builder --dir
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+
+      - name: Smoke boot (macOS)
+        if: runner.os == 'macOS'
+        run: APP_SMOKE=1 "./dist/mac/Confluence Local.app/Contents/MacOS/Confluence Local"
+
+      - name: Smoke boot (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $env:APP_SMOKE = '1'
+          $proc = Start-Process -FilePath '.\dist\win-unpacked\Confluence Local.exe' -PassThru -Wait
+          exit $proc.ExitCode
+
   gitleaks:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest

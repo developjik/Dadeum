@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app } from 'electron'
+import { writePageBody } from '../core/editor/pageWrite'
 import { type PageRecord, SyncStateDb } from '../core/store/syncState'
 import { buildPageTree, type PageTreeNode } from '../core/store/tree'
 import {
@@ -75,6 +76,14 @@ export function readPageFileGuarded(relativePath: string): ReadPageResult {
     version: meta.version,
     markdown: body,
   }
+}
+
+/**
+ * 페이지 본문 직접 저장 — 캐리어 무결성·경로 게이트는 core/writePageBody가 담당한다.
+ * frontmatter는 파일에서 다시 읽은 값을 그대로 재직렬화하므로 renderer가 메타를 건드릴 수 없다.
+ */
+export function writePageBodyGuarded(relativePath: string, body: string): ReadPageResult {
+  return writePageBody(resolveWorkspaceRoot(), relativePath, body)
 }
 
 /** 온보딩에 필요한 Atlassian 공식 도메인(API 토큰 발급 페이지 등). */

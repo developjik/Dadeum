@@ -11,3 +11,5 @@ artifacts/
 .env
 .env.*
 .mimosa/
+# 에이전트 세션 산출물(plans 등) — 커밋 대상 아님
+.zcode/

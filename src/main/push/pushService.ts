@@ -1,7 +1,9 @@
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { ConfluenceClient } from '../../core/confluence/client'
+import { ConfluenceApiError } from '../../core/confluence/types'
 import { markdownToStorage } from '../../core/converter/markdownToStorage'
+import { storageToMarkdown } from '../../core/converter/storageToMarkdown'
 import type { ApprovalSnapshot } from '../../core/push/approval'
 import { verifySnapshot } from '../../core/push/approval'
 /**
@@ -13,6 +15,7 @@ import { verifySnapshot } from '../../core/push/approval'
  */
 import type { PushOutcome } from '../../core/push/types'
 import { fileHashOf } from '../../core/store/hash'
+import { canonicalMarkdownBody, pageContentHashOf } from '../../core/store/pageFingerprint'
 import type { SyncStateDb } from '../../core/store/syncState'
 import { parsePageFile } from '../../core/store/workspace'
 import type { SpaceStateMachine } from '../../core/sync/spaceStateMachine'
@@ -198,6 +201,13 @@ async function pushOne(
     if (created.version !== 1) {
       throw new Error(`신규 생성 응답 버전이 비정상입니다: ${created.version}`)
     }
+    // REST 생성 페이지는 legacy editor 취급될 수 있다(사용자 저장 시 첨부 참조가
+    // UNKNOWN_ATTACHMENT로 재작성되는 결함) — editor=v2 속성을 심는다(최선 노력).
+    try {
+      await client.setPageContentProperty(created.pageId, 'editor', 'v2')
+    } catch {
+      // 속성 설정 실패가 이미 완료된 생성을 되돌리지는 않는다
+    }
     const createdRaw = renderUpdatedFile(meta, created.pageId, created.version, body)
     writeFileSync(absPath, createdRaw, 'utf8')
     db.upsertPage({
@@ -207,8 +217,9 @@ async function pushOne(
       title: created.title ?? meta.title,
       version: created.version,
       parentId: created.parentId ?? meta.parentId,
-      contentHash: fileHashOf(createdRaw),
+      contentHash: pageContentHashOf(createdRaw),
     })
+    db.setBaseCopy(created.pageId, canonicalMarkdownBody(body), created.version)
     outcome.uploaded.push({ path: relPath, pageId: created.pageId, newVersion: created.version })
 
     // 신규 페이지 첨부 동기화(생성 후 즉시 업로드)
@@ -239,16 +250,45 @@ async function pushOne(
   // 제목은 로컬 frontmatter를 우선한다 — 사용자의 로컬 rename이 조용히 무시되지 않도록.
   const expectedRemote = remoteVersion ?? meta.version
   const moveRequest = parentMoveRequest({ db, spaceId, relPath, meta })
-  const updated = await client.updatePage({
-    pageId: meta.pageId,
-    currentVersion: expectedRemote,
-    title: meta.title,
-    storageValue,
-    ...moveRequest,
-  })
+  let updated: Awaited<ReturnType<typeof client.updatePage>>
+  try {
+    updated = await client.updatePage({
+      pageId: meta.pageId,
+      currentVersion: expectedRemote,
+      title: meta.title,
+      storageValue,
+      ...moveRequest,
+    })
+  } catch (cause) {
+    // 사전 검사(GET)와 PUT 사이에 원격이 바뀐 좁은 창(409) — 실패가 아니라 충돌로 분류해
+    // 사용자가 충돌 해결 UI로 안내받게 한다. 현재 원격 버전을 재조회해 함께 보고한다.
+    if (cause instanceof ConfluenceApiError && cause.kind === 'conflict') {
+      const current = await client.getPageStorage(meta.pageId)
+      outcome.conflicts.push({ path: relPath, pageId: meta.pageId, remoteVersion: current.version })
+      return
+    }
+    throw cause
+  }
   // 반영 성공 판정(AC-4): 응답 버전 == 기대+1
   if (updated.version !== expectedRemote + 1) {
     throw new Error(`버전 증가 확인 실패: 기대 ${expectedRemote + 1}, 응답 ${updated.version}`)
+  }
+  // 반영 검증(침묵 no-op 방지 — 동일 내용 PUT이 조용히 무시되는 결함 대비):
+  // 재조회한 원격을 마크다운으로 되돌려 정규화 비교한다. md→storage→md 멱등성이
+  // 서버 저장본과 업로드 본문의 동치 판정을 보장한다.
+  const verified = await client.getPageStorage(meta.pageId)
+  if (verified.version !== updated.version) {
+    throw new Error(
+      `반영 검증 실패: 서버 버전이 응답(${updated.version})과 다릅니다(${verified.version}). 다시 검토하세요.`,
+    )
+  }
+  if (
+    canonicalMarkdownBody(storageToMarkdown(verified.storageValue).markdown) !==
+    canonicalMarkdownBody(body)
+  ) {
+    throw new Error(
+      '반영 검증 실패: 서버에 저장된 내용이 업로드한 본문과 다릅니다. 변경 세트를 다시 검토하세요.',
+    )
   }
   // 이동 push가 반영됐으면 frontmatter·db의 parentId도 새 위치로 맞춘다
   const effectiveParentId = moveRequest
@@ -272,9 +312,10 @@ async function pushOne(
     title: meta.title,
     version: updated.version,
     parentId: effectiveParentId,
-    contentHash: fileHashOf(updatedRaw),
+    contentHash: pageContentHashOf(updatedRaw),
     updatedAt: null,
   })
+  db.setBaseCopy(meta.pageId, canonicalMarkdownBody(body), updated.version)
   outcome.uploaded.push({ path: relPath, pageId: meta.pageId, newVersion: updated.version })
 
   // 첨부 업로드 동기화(ef-9): 페이지 디렉터리의 첨부 중 hash가 다른 것만 업로드
@@ -296,31 +337,34 @@ async function pushOne(
         fileHash: hash,
       })
     }
+  }
 
-    // 첨부 삭제 동기화: 'db가 과거에 동기화한 첨부'가 로컬에서 사라졌을 때만 원격에서 정리한다.
-    // 한 번도 내려받은 적 없는 원격 첨부(첨부는 페이지 버전을 올리지 않아 버전 게이트가
-    // 못 잡는다)를 지우면 사용자가 본 적도 없는 데이터가 영구 삭제된다 — 보존하고 결과에 보고.
-    const knownRecords = db.listAttachmentsByPage(meta.pageId)
-    const localNames = new Set(
-      readdirSync(attachmentsDir, { withFileTypes: true }).map((e) => e.name),
-    )
-    const remoteAttachments = await client.listAttachments(meta.pageId)
-    for (const remote of remoteAttachments) {
-      if (localNames.has(remote.fileName)) continue
-      if (!knownRecords.some((record) => record.fileName === remote.fileName)) {
-        outcome.skippedRemoteAttachments.push({
-          path: relPath.replace(/index\.md$/, `attachments/${remote.fileName}`),
-          fileName: remote.fileName,
-        })
-        continue
-      }
-      await client.deleteAttachment(remote.id)
-      db.deleteAttachment(meta.pageId, remote.fileName)
-      outcome.deletedAttachments.push({
+  // 첨부 삭제 동기화: 'db가 과거에 동기화한 첨부'가 로컬에서 사라졌을 때만 원격에서 정리한다.
+  // 한 번도 내려받은 적 없는 원격 첨부(첨부는 페이지 버전을 올리지 않아 버전 게이트가
+  // 못 잡는다)를 지우면 사용자가 본 적도 없는 데이터가 영구 삭제된다 — 보존하고 결과에 보고.
+  // attachments/ 디렉터리째 삭제도 '전부 삭제' 의도로 해석한다 — 디렉터리가 없으면 빈 집합으로 대사한다.
+  const knownRecords = db.listAttachmentsByPage(meta.pageId)
+  const localNames = new Set(
+    existsSync(attachmentsDir)
+      ? readdirSync(attachmentsDir, { withFileTypes: true }).map((e) => e.name)
+      : [],
+  )
+  const remoteAttachments = await client.listAttachments(meta.pageId)
+  for (const remote of remoteAttachments) {
+    if (localNames.has(remote.fileName)) continue
+    if (!knownRecords.some((record) => record.fileName === remote.fileName)) {
+      outcome.skippedRemoteAttachments.push({
         path: relPath.replace(/index\.md$/, `attachments/${remote.fileName}`),
         fileName: remote.fileName,
       })
+      continue
     }
+    await client.deleteAttachment(remote.id)
+    db.deleteAttachment(meta.pageId, remote.fileName)
+    outcome.deletedAttachments.push({
+      path: relPath.replace(/index\.md$/, `attachments/${remote.fileName}`),
+      fileName: remote.fileName,
+    })
   }
 }
 

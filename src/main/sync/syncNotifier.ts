@@ -15,6 +15,7 @@ export type SyncEvent =
       failed: number
     }
   | { type: 'auth-error'; spaceKey: string; message: string }
+  | { type: 'sync-error'; spaceKey: string; message: string }
   | { type: 'pull-progress'; spaceKey: string; done: number; total: number }
 
 let sender: WebContents | null = null

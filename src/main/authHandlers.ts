@@ -1,14 +1,16 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { DEFAULT_ADAPTER_NAME } from '../core/agent/types'
 import { ConfluenceClient } from '../core/confluence/client'
 import { storageToMarkdown } from '../core/converter/storageToMarkdown'
 import { captureSnapshot, verifySnapshot } from '../core/push/approval'
 import { computeChangeSet } from '../core/push/changeSet'
 import { markdownLineDiff } from '../core/push/diff'
-import { fileHashOf } from '../core/store/hash'
+import { pageHashMatches } from '../core/store/pageFingerprint'
 import { safeSpaceDirName } from '../core/store/workspace'
 import { ChatRunService } from './agent/chatService'
 import { ClaudeCodeAdapter } from './agent/claudeCodeAdapter'
+import { PiAdapter } from './agent/piAdapter'
 import { buildReviewPrompt } from './agent/reviewPrompt'
 import {
   clearCredentials,
@@ -36,6 +38,7 @@ import {
   listPageTree,
   readPageFileGuarded,
   resolveWorkspaceRoot,
+  writePageBodyGuarded,
 } from './workspaceAccess'
 
 interface ConnectPayload {
@@ -72,6 +75,41 @@ export const chatRuns = new ChatRunService()
 /** 진행 중 전체 pull의 취소 요청 등록(spaces:pull ↔ pull:cancel). */
 const pullCancelRequests = new Set<string>()
 chatRuns.registerAdapter(new ClaudeCodeAdapter())
+chatRuns.registerAdapter(new PiAdapter())
+
+/**
+ * 스페이스가 쓸 에이전트 어댑터 — 요청 지정 → 스페이스 저장값 → 기본 어댑터 순.
+ * 저장값이 미설치 CLI를 가리키면(삭제 등) 기본값으로 되돌린다.
+ */
+function resolveAdapterName(
+  db: ReturnType<typeof getWorkspaceDb>,
+  spaceKey: string,
+  payloadAdapterName: unknown,
+): string {
+  if (typeof payloadAdapterName === 'string' && payloadAdapterName.length > 0) {
+    return payloadAdapterName
+  }
+  const saved = db.getAgentAdapterName(spaceKey)
+  if (saved && chatRuns.getAdapter(saved)?.discover()) return saved
+  return DEFAULT_ADAPTER_NAME
+}
+
+/** 런 시작 전 설치 검증 — 미설치 CLI는 스폰 ENOENT보다 명확한 안내로 차단한다. */
+function requireInstalledAdapter(adapterName: string): void {
+  const adapter = chatRuns.getAdapter(adapterName)
+  if (!adapter) throw new Error(`알 수 없는 에이전트입니다: ${adapterName}`)
+  if (!adapter.discover()) {
+    throw new Error(`${adapterName} CLI가 설치되어 있지 않습니다. 설치 후 다시 시도하세요.`)
+  }
+}
+
+/** 감사 런용 어댑터 — JSON 판정을 파싱하지 못하는 어댑터는 기본 어댑터로 폴백한다. */
+function resolveReviewAdapter(adapterName: string): string {
+  if (chatRuns.getAdapter(adapterName)?.capabilities().supportsJsonReview) return adapterName
+  const fallback = chatRuns.getAdapter(DEFAULT_ADAPTER_NAME)
+  if (fallback?.discover()) return DEFAULT_ADAPTER_NAME
+  throw new Error('변경 감사(JSON 판정)를 지원하는 에이전트가 설치되어 있지 않습니다')
+}
 
 /**
  * 앱 재시작 후 auth:status가 연결 상태를 확인하면 저장된 스페이스의 자동 폴링을 복원한다.
@@ -110,24 +148,51 @@ export function registerAuthAndSpaceHandlers(): void {
     return { spaces: await client.listAllSpaces() }
   })
   registerIpcHandler('agent:run', (payload, sender) => {
-    const input = payload as { spaceKey?: string; prompt?: string }
+    const input = payload as { spaceKey?: string; prompt?: string; adapterName?: string }
     const spaceKey = String(input.spaceKey ?? '')
     const prompt = String(input.prompt ?? '')
     if (!spaceKey || !prompt) throw new Error('spaceKey와 prompt가 필요합니다')
+    const db = getWorkspaceDb()
+    const adapterName = resolveAdapterName(db, spaceKey, input.adapterName)
+    requireInstalledAdapter(adapterName)
     const spaceRoot = join(resolveWorkspaceRoot(), 'spaces', safeSpaceDirName(spaceKey))
     return chatRuns.startRun({
       sender,
-      adapterName: 'claude-code',
+      adapterName,
       spaceKey,
       prompt,
       spaceRoot,
-      db: getWorkspaceDb(),
+      db,
     })
   })
   registerIpcHandler('agent:cancel', (payload) => {
     const runId = String((payload as { runId?: string })?.runId ?? '')
     if (!runId) throw new Error('runId가 필요합니다')
     chatRuns.cancelRun(runId)
+    return { ok: true }
+  })
+  /** agent:list — 등록된 에이전트(설치 여부·기능)와 스페이스의 현재 선택. */
+  registerIpcHandler('agent:list', (payload) => {
+    const spaceKey = String((payload as { spaceKey?: string })?.spaceKey ?? '')
+    const agents = chatRuns.listAgents()
+    let selected = DEFAULT_ADAPTER_NAME
+    if (spaceKey.length > 0) {
+      const saved = getWorkspaceDb().getAgentAdapterName(spaceKey)
+      // 저장값이 여전히 설치된 어댑터일 때만 반영한다(삭제된 CLI는 기본값으로 귀환)
+      if (saved && agents.some((agent) => agent.name === saved && agent.installed)) {
+        selected = saved
+      }
+    }
+    return { agents, selected, default: DEFAULT_ADAPTER_NAME }
+  })
+  /** agent:select — 스페이스별 에이전트 선택 저장(설치된 어댑터만 허용). */
+  registerIpcHandler('agent:select', (payload) => {
+    const input = payload as { spaceKey?: string; adapterName?: string }
+    const spaceKey = String(input.spaceKey ?? '')
+    const adapterName = String(input.adapterName ?? '')
+    if (!spaceKey || !adapterName) throw new Error('spaceKey와 adapterName이 필요합니다')
+    requireInstalledAdapter(adapterName)
+    getWorkspaceDb().setAgentAdapterName(spaceKey, adapterName)
     return { ok: true }
   })
   registerIpcHandler('review:run', (payload, sender) => {
@@ -144,9 +209,16 @@ export function registerAuthAndSpaceHandlers(): void {
     if (paths.length === 0) return { runId: undefined, empty: true }
 
     const spaceRoot = join(resolveWorkspaceRoot(), 'spaces', safeSpaceDirName(spaceKey))
+    const adapterName = resolveReviewAdapter(
+      resolveAdapterName(
+        getWorkspaceDb(),
+        spaceKey,
+        (payload as { adapterName?: string }).adapterName,
+      ),
+    )
     const { runId } = chatRuns.startRun({
       sender,
-      adapterName: 'claude-code',
+      adapterName,
       spaceKey,
       prompt: buildReviewPrompt(instruction, paths),
       spaceRoot,
@@ -196,8 +268,7 @@ export function registerAuthAndSpaceHandlers(): void {
       }
       const absPath = join(resolveWorkspaceRoot(), page.path)
       if (page.contentHash !== null && existsSync(absPath)) {
-        const current = fileHashOf(readFileSync(absPath))
-        if (current !== page.contentHash) {
+        if (!pageHashMatches(readFileSync(absPath, 'utf8'), page.contentHash)) {
           candidates.push({ pageId: page.pageId, path: page.path, reason: 'dirty' })
         }
       }
@@ -255,6 +326,12 @@ export function registerAuthAndSpaceHandlers(): void {
     const path = String((payload as { path?: string })?.path ?? '')
     if (!path) throw new Error('path가 필요합니다')
     return readPageFileGuarded(path)
+  })
+  registerIpcHandler('pages:write', (payload) => {
+    const input = payload as { path?: string; body?: string }
+    const path = String(input?.path ?? '')
+    if (!path || typeof input?.body !== 'string') throw new Error('path와 body가 필요합니다')
+    return writePageBodyGuarded(path, input.body)
   })
   registerIpcHandler('app:open-external', (payload) => {
     const url = String((payload as { url?: string })?.url ?? '')

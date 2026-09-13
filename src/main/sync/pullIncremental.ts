@@ -1,7 +1,7 @@
 import { existsSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { ConfluenceClient, ConfluenceSpace } from '../../core/confluence/client'
-import { fileHashOf } from '../../core/store/hash'
+import { pageHashMatches } from '../../core/store/pageFingerprint'
 import type { SyncStateDb } from '../../core/store/syncState'
 import { dirSafeSpaceKey, slugify } from '../../core/store/workspace'
 import { machineFor } from './machines'
@@ -49,7 +49,7 @@ export async function pullIncremental(options: {
         // dirty 보호: 로컬 hash가 last-synced와 다르면 건드리지 않는다
         const absPath = join(workspaceRoot, dir, 'index.md')
         if (record?.contentHash && existsSync(absPath)) {
-          if (fileHashOf(readFileSync(absPath)) !== record.contentHash) {
+          if (!pageHashMatches(readFileSync(absPath, 'utf8'), record.contentHash)) {
             skippedDirty.push(pageId)
             continue
           }

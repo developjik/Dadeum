@@ -7,6 +7,8 @@ export const ko = {
     title: 'Confluence 로컬',
     tagline: '문서를 로컬에서 수정하고, 검토 후 Confluence로 업로드합니다',
     loading: '불러오는 중…',
+    renderCrashLimit:
+      '화면이 계속 종료되어 더 이상 자동으로 다시 열지 않습니다. 앱을 재시작하세요 — 문제가 반복되면 변경 사항과 함께 신고해 주세요.',
   },
   common: {
     close: '닫기',
@@ -31,6 +33,9 @@ export const ko = {
       `API 토큰이 만료되어 ${spaceKey ? `${spaceKey} ` : ''}자동 동기화를 중단했습니다. 다시 연결하세요.`,
     conflictCandidates: (count: number) => `충돌 후보 ${count}건`,
     remoteDeleted: '원격에서 삭제됨',
+    degraded: '자동 동기화 실패 — 재시도 대기 중',
+    degradedNotice: (reason: string) =>
+      `자동 동기화 실패: ${reason}. 잠시 후 자동으로 재시도합니다.`,
     pull: '가져오기',
     pullCancel: '동기화 중단',
     pullHint: '연결됐습니다. 스페이스 옆 가져오기 버튼으로 문서를 내려받으세요.',
@@ -58,6 +63,12 @@ export const ko = {
     title: '에이전트',
     empty: '에이전트에게 문서 작업을 지시해 보세요',
     toolPrefix: '도구 실행',
+    agentSelect: '사용할 에이전트',
+    /** 어댑터 이름 표시 라벨 — 없으면 이름 그대로 쓴다 */
+    agentNames: {
+      'claude-code': 'Claude Code',
+      pi: 'pi',
+    } as Record<string, string>,
   },
   errors: {
     preloadNotReady: '앱 경계(preload)가 준비되지 않았습니다',
@@ -68,6 +79,24 @@ export const ko = {
     empty: '왼쪽에서 문서를 선택하세요',
     carrierOnly:
       '이 문서는 Confluence 전용 요소(레이아웃·매크로)만 담고 있어 로컬 미리보기가 제한됩니다. 원본은 [Confluence에서 보기]에서 확인하세요.',
+  },
+  editor: {
+    edit: '직접 편집',
+    editingBadge: '편집 중',
+    dirtyBadge: '변경됨',
+    save: '저장',
+    saving: '저장 중…',
+    cancelEdit: '편집 취소',
+    cancelConfirm: '저장하지 않은 변경이 있습니다. 편집을 취소할까요?',
+    cancelConfirmYes: '취소 확정',
+    cancelConfirmNo: '계속 편집',
+    savedNotice: '저장했습니다 — 업로드 검토 탭에서 Confluence 반영을 확정하세요',
+    blockedByOtherDraft:
+      '다른 문서에 저장하지 않은 편집이 있습니다. 해당 문서에서 저장하거나 편집을 취소한 뒤 다시 시도하세요.',
+    loadFailed: '편집할 문서를 불러오지 못했습니다',
+    carrierHint:
+      '점선 블록은 Confluence 전용 요소(매크로·레이아웃)입니다 — 원본 보호를 위해 직접 수정할 수 없습니다.',
+    frontmatterHint: '제목·버전 등 문서 정보는 업로드 시 자동 관리됩니다.',
   },
   tree: {
     empty: '동기화된 문서가 없습니다 — 스페이스 옆 가져오기 버튼으로 내려받으세요',
@@ -91,6 +120,8 @@ export const ko = {
     addedCount: (count: number) => `신규 ${count}`,
     attachmentCount: (count: number) => `첨부 ${count}`,
     confirmUpload: (count: number) => `선택한 ${count}개 항목을 Confluence에 업로드합니다`,
+    confirmUploadWithErrors: (count: number) =>
+      `경고: 변경 감사에서 '승인 보류 권고'를 받은 파일 ${count}개가 포함되어 있습니다. 업로드하면 해당 문제가 원격에 그대로 반영됩니다.`,
     uploadConfirm: '업로드 확정',
     deletedAttachment: '원격 첨부 삭제',
     skippedRemoteAttachment: '원격에만 있는 첨부 — 로컬 미동기화, 삭제하지 않았음',
@@ -113,8 +144,14 @@ export const ko = {
     none: '충돌 후보가 없습니다',
     localChanges: '로컬 변경',
     overwrite: '내 로컬 버전으로 업로드',
+    keepBoth: '둘 다 보존(로컬 우선)',
+    keepBothHint:
+      '원격 판을 <file>.remote.md로 내려받아 보존하고, 로컬은 그대로 다음 업로드 대상이 됩니다.',
     takeRemote: '원격 최신본으로 교체',
     manualMerge: 'diff 보고 직접 처리',
+    manualMergeHint:
+      '원격 본문을 <file>.remote.md로 내려받았습니다. 아래 차이를 보고 로컬 파일을 직접 병합한 뒤 다시 검토·승인하세요.',
+    diffLabel: '로컬 ↔ 원격 차이',
     overwriteWarning: '원격 변경이 폐기됩니다.',
     overwriteConfirm: '덮어쓰면 원격 변경이 폐기됩니다. 확정할까요?',
     overwriteConfirmYes: '덮어쓰기 확정',
@@ -132,6 +169,23 @@ export const ko = {
     restarting: '재시작 중…',
     failed: (message: string) => `업데이트 실패${message ? ` — ${message}` : ''}`,
   },
+  settings: {
+    title: '설정',
+    theme: '테마',
+    themeMode: '모드',
+    themeAccent: '강조색',
+    modeSystem: '시스템',
+    modeLight: '라이트',
+    modeDark: '다크',
+    accentBlue: '파랑',
+    accentTeal: '청록',
+    accentViolet: '바이올렛',
+    accentRose: '로즈',
+    accentGreen: '그린',
+    vscode: 'VS Code 테마',
+    vscodeHint: '모드·강조색 설정 대신 이 테마 팔레트가 적용됩니다.',
+    contrastWarning: '이 테마는 일부 텍스트 대비가 4.5:1에 못 미칩니다',
+  },
   auth: {
     siteUrl: '사이트 주소',
     email: '이메일',
@@ -141,6 +195,8 @@ export const ko = {
     tokenLink: 'API 토큰 발급 페이지 열기',
     connect: '연결',
     disconnect: '연결 해제',
+    reconnectNotice:
+      '보안 저장소에서 저장된 토큰을 읽지 못했습니다(앱 업데이트로 서명이 바뀐 경우 발생). 사이트 주소와 이메일은 불러왔습니다 — API 토큰만 다시 입력하세요.',
   },
   aria: {
     spaces: '스페이스 목록',
@@ -152,6 +208,8 @@ export const ko = {
     confirmUpload: '업로드 확정',
     conflicts: '충돌 처리',
     pagePreview: '문서 미리보기',
+    pageEditor: '문서 편집기',
     documentTree: '문서 트리',
+    settings: '설정 열기',
   },
 } as const

@@ -20,6 +20,27 @@ describe('isAllowedNavigation', () => {
     ).toBe(false)
   })
 
+  it('Windows 형식(백슬래시 접두사·드라이브 문자 선행 슬래시)도 정규화해 비교한다', () => {
+    // main은 node:fs(join) 결과인 'C:\…' 백슬래시 접두사를 전달하고,
+    // URL pathname은 '/C:/…' 형태로 온다 — 정규화 없으면 항상 불일치했다.
+    expect(
+      isAllowedNavigation('file:///C:/app/out/renderer/index.html', {
+        allowedFilePathPrefix: 'C:\\app\\out\\renderer',
+      }),
+    ).toBe(true)
+    expect(
+      isAllowedNavigation('file:///C:/app/secrets/keys', {
+        allowedFilePathPrefix: 'C:\\app\\out\\renderer',
+      }),
+    ).toBe(false)
+    // 드라이브 문자만 바꾼 우회(C: → D:)도 거부
+    expect(
+      isAllowedNavigation('file:///D:/app/out/renderer/index.html', {
+        allowedFilePathPrefix: 'C:\\app\\out\\renderer',
+      }),
+    ).toBe(false)
+  })
+
   it('개발 모드에서 localhost http만 허용한다', () => {
     expect(isAllowedNavigation('http://localhost:5173/', { dev: true })).toBe(true)
     expect(isAllowedNavigation('http://127.0.0.1:5173/src/main.tsx', { dev: true })).toBe(true)

@@ -1,12 +1,14 @@
 import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { pageContentHashOf, pageHashMatches } from '../store/pageFingerprint'
 import type { PageRecord, SyncStateDb } from '../store/syncState'
 import { isSyncTarget, parsePageFile, safeSpaceDirName } from '../store/workspace'
 
 /**
  * 변경 세트 산출(계획 §8.3-1): allowlist 파일을 스캔해 db 해시와 비교한다.
- * - modified: db에 있고 content_hash가 바뀐 페이지
+ * - modified: db에 있고 content_hash가 바뀐 페이지(정규화 지문 — 앱 관리 필드·개행
+ *   표기 차이는 변경이 아니다)
  * - added: db에 없는 새 index.md(frontmatter 파싱 성공 = 새 페이지 후보)
  * - missing: db에 있는데 파일이 사라진 페이지(사용자 안내 대상)
  */
@@ -57,7 +59,6 @@ export function computeChangeSet(
     const relPath = absPath.slice(workspaceRoot.length + 1)
     seenDirs.add(relPath.replace(/\/index\.md$/, ''))
     const raw = readFileSync(absPath, 'utf8')
-    const hash = sha256(raw)
 
     let pageId: string | null = null
     let title = ''
@@ -72,8 +73,13 @@ export function computeChangeSet(
     const record = db.getPage(pageId)
     if (!record) {
       added.push({ path: relPath, title })
-    } else if (record.contentHash !== hash) {
-      modified.push({ path: relPath, pageId, oldHash: record.contentHash, newHash: hash })
+    } else if (record.contentHash === null || !pageHashMatches(raw, record.contentHash)) {
+      modified.push({
+        path: relPath,
+        pageId,
+        oldHash: record.contentHash,
+        newHash: pageContentHashOf(raw),
+      })
     }
 
     // 첨부 스캔(ef-9): 이 페이지 디렉터리의 attachments를 db와 비교

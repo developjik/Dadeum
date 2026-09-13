@@ -3,7 +3,7 @@ import { dirname, join } from 'node:path'
 import type { ConfluenceClient } from '../../core/confluence/client'
 import { markdownToStorage } from '../../core/converter/markdownToStorage'
 import { storageToMarkdown } from '../../core/converter/storageToMarkdown'
-import { fileHashOf } from '../../core/store/hash'
+import { canonicalMarkdownBody, pageContentHashOf } from '../../core/store/pageFingerprint'
 import type { SyncStateDb } from '../../core/store/syncState'
 import {
   assertSyncPagePath,
@@ -12,14 +12,17 @@ import {
   renderPageFile,
 } from '../../core/store/workspace'
 import { machineFor } from './machines'
+import { localBodyNonEmpty } from './pullService'
 
-export type ConflictChoice = 'overwrite' | 'take-remote' | 'manual'
+export type ConflictChoice = 'overwrite' | 'take-remote' | 'manual' | 'keep-both'
 
 /**
- * 충돌 3지 선택 처리(ef-8, AC-6 — 안전 우선, 자동 진행 금지):
+ * 충돌 4지 선택 처리(ef-8, AC-6 — 안전 우선, 자동 진행 금지):
  * ① 덮어쓰기 — 최신 원격 버전을 기준 버전으로 로컬 내용 업로드(원격 변경 폐기 경고)
- * ② 원격 받기 — 로컬 변경은 .sync/trash/<ts>/ 백업 후 원격 판으로 교체
- * ③ 직접 처리 — 원격 본문을 <file>.remote.md로 생성(allowlist 제외), 사용자 병합 후 재승인
+ * ② 둘 다 보존 — 원격 판을 <file>.remote.md로 보존하고 로컬을 다음 업로드의
+ *    기준으로 남긴다(로컬이 이기되 아무것도 버리지 않는다 — 3-way 병합의 여지 보관)
+ * ③ 원격 받기 — 로컬 변경은 .sync/trash/<ts>/ 백업 후 원격 판으로 교체
+ * ④ 직접 처리 — 원격 본문을 <file>.remote.md로 생성(allowlist 제외), 사용자 병합 후 재승인
  */
 export async function resolveConflict(options: {
   choice: ConflictChoice
@@ -57,6 +60,14 @@ export async function resolveConflict(options: {
       if (updated.version !== remote.version + 1) {
         throw new Error(`버전 증가 확인 실패: 기대 ${remote.version + 1}, 응답 ${updated.version}`)
       }
+      // 반영 검증(침묵 no-op 방지): 재조회한 원격을 마크다운으로 되돌려 비교한다
+      const verified = await client.getPageStorage(pageId)
+      if (
+        canonicalMarkdownBody(storageToMarkdown(verified.storageValue).markdown) !==
+        canonicalMarkdownBody(body)
+      ) {
+        throw new Error('반영 검증 실패: 서버에 저장된 내용이 업로드한 본문과 다릅니다')
+      }
       const updatedRaw = renderPageFile(
         { ...meta, version: updated.version, syncedAt: new Date().toISOString() },
         body,
@@ -69,9 +80,10 @@ export async function resolveConflict(options: {
         title: meta.title,
         version: updated.version,
         parentId: meta.parentId,
-        contentHash: fileHashOf(updatedRaw),
+        contentHash: pageContentHashOf(updatedRaw),
         updatedAt: null,
       })
+      db.setBaseCopy(pageId, canonicalMarkdownBody(body), updated.version)
       return { applied: 'overwrite' }
     } finally {
       machine.apply('endPush')
@@ -85,6 +97,12 @@ export async function resolveConflict(options: {
     if (!started.ok) throw new Error('에이전트 실행 중이거나 동기화 중이라 처리할 수 없습니다')
     try {
       const remote = await client.getPageStorage(pageId)
+      // 빈 원격(Live Doc 의심) 교체 차단 — 백업이 있더라도 유령 빈 문서로 교체할 이유가 없다
+      if (!remote.storageValue.trim() && localBodyNonEmpty(absPath)) {
+        throw new Error(
+          '원격 본문이 비어 있습니다(Live Doc 의심) — 잠시 후 재시도하거나 내 로컬 버전으로 업로드하세요',
+        )
+      }
       const markdown = storageToMarkdown(remote.storageValue).markdown
       const ts = new Date().toISOString().replace(/[:.]/g, '-')
       let backupPath: string | undefined
@@ -113,11 +131,53 @@ export async function resolveConflict(options: {
         title: remote.title || baseMeta.title,
         version: remote.version,
         parentId: baseMeta.parentId,
-        contentHash: fileHashOf(updatedRaw),
+        contentHash: pageContentHashOf(updatedRaw),
         updatedAt: null,
       })
+      db.setBaseCopy(pageId, canonicalMarkdownBody(markdown), remote.version)
       db.clearRemoteDeleted(pageId)
       return { applied: 'take-remote', backupPath }
+    } finally {
+      machine.apply('endPush')
+    }
+  }
+
+  if (choice === 'keep-both') {
+    // Syncthing 방식 양보 보존: 원격 판을 <file>.remote.md로 내려받아 아무것도 버리지
+    // 않되, 로컬을 다음 업로드의 승자로 남긴다 — 기준 버전만 원격으로 전진시켜
+    // 이후 push가 충돌 없이 로컬 판으로 이기게 한다. base는 원격 판으로 기록해
+    // 3-way 병합(계획 P1)이 양쪽 분기를 모두 볼 수 있게 한다.
+    const started = machine.apply('startPush')
+    if (!started.ok) throw new Error('에이전트 실행 중이거나 동기화 중이라 처리할 수 없습니다')
+    try {
+      const remote = await client.getPageStorage(pageId)
+      if (!remote.storageValue.trim() && localBodyNonEmpty(absPath)) {
+        throw new Error(
+          '원격 본문이 비어 있습니다(Live Doc 의심) — 잠시 후 재시도하거나 내 로컬 버전으로 업로드하세요',
+        )
+      }
+      const remoteMarkdown = storageToMarkdown(remote.storageValue).markdown
+      const remoteFile = absPath.replace(/\.md$/, '.remote.md') // allowlist 제외 — 변경 세트 유입 없음(F3)
+      writeFileSync(remoteFile, remoteMarkdown, 'utf8')
+
+      const { meta, body } = parsePageFile(readFileSync(absPath, 'utf8'))
+      const updatedRaw = renderPageFile(
+        { ...meta, version: remote.version, syncedAt: new Date().toISOString() },
+        body,
+      )
+      writeFileSync(absPath, updatedRaw, 'utf8')
+      db.upsertPage({
+        pageId,
+        spaceKey: meta.spaceKey,
+        path: safePath,
+        title: meta.title,
+        version: remote.version,
+        parentId: meta.parentId,
+        contentHash: pageContentHashOf(updatedRaw),
+        updatedAt: null,
+      })
+      db.setBaseCopy(pageId, canonicalMarkdownBody(remoteMarkdown), remote.version)
+      return { applied: 'keep-both', remoteFile }
     } finally {
       machine.apply('endPush')
     }

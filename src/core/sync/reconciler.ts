@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs'
 import { dirname, join } from 'node:path'
-import { fileHashOf } from '../store/hash'
+import { pageHashMatches } from '../store/pageFingerprint'
 import type { PageRecord, SyncStateDb } from '../store/syncState'
 
 /**
@@ -60,6 +60,7 @@ export function reconcilePageIds(options: {
 
 function isDirty(page: PageRecord, absPath: string): boolean {
   if (!existsSync(absPath)) return false
-  const current = fileHashOf(readFileSync(absPath))
-  return page.contentHash !== null && current !== page.contentHash
+  return (
+    page.contentHash !== null && !pageHashMatches(readFileSync(absPath, 'utf8'), page.contentHash)
+  )
 }

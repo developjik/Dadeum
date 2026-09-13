@@ -19,9 +19,6 @@ mac:
   target:
     - target: dmg
     - target: zip
-files:
-  - out/**
-  - package.json
 publish:
   - provider: github
     # owner/repo는 빌드 시 GH_OWNER/GH_REPO 환경변수(또는 package.json repository)로 해석되며

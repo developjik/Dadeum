@@ -1,5 +1,10 @@
 import type { WebContents } from 'electron'
-import type { AgentAdapter, AgentRunHandle } from '../../core/agent/types'
+import {
+  type AgentAdapter,
+  type AgentDescriptor,
+  type AgentRunHandle,
+  DEFAULT_ADAPTER_NAME,
+} from '../../core/agent/types'
 import type { SyncStateDb } from '../../core/store/syncState'
 import type { SpaceStateMachine } from '../../core/sync/spaceStateMachine'
 import { machineFor as sharedMachineFor } from '../sync/machines'
@@ -9,6 +14,7 @@ import { machineFor as sharedMachineFor } from '../sync/machines'
  * - 스페이스당 동시 run 1개(상태머신 agent-run 락)
  * - 이벤트는 webContents.send('agent:event', …)로 스트리밍
  * - 세션 매핑은 sync-state.db의 chat_sessions에 보관(1:1, --resume 연속)
+ * - 어댑터는 레지스트리로 다중 등록 — 선택은 호출자(agent:list/agent:select)가 결정
  */
 export class ChatRunService {
   private readonly adapters = new Map<string, AgentAdapter>()
@@ -16,6 +22,23 @@ export class ChatRunService {
 
   registerAdapter(adapter: AgentAdapter): void {
     this.adapters.set(adapter.name, adapter)
+  }
+
+  getAdapter(name: string): AgentAdapter | undefined {
+    return this.adapters.get(name)
+  }
+
+  /** 등록된 어댑터 요약(설치 감지 포함) — agent:list 응답 원천. */
+  listAgents(): AgentDescriptor[] {
+    return [...this.adapters.values()].map((adapter) => {
+      const installation = adapter.discover()
+      return {
+        name: adapter.name,
+        installed: installation !== null,
+        command: installation?.command,
+        capabilities: adapter.capabilities(),
+      }
+    })
   }
 
   machineFor(spaceKey: string): SpaceStateMachine {
@@ -39,7 +62,7 @@ export class ChatRunService {
     const { sender, spaceKey, prompt, spaceRoot, db } = options
     const kind = options.kind ?? 'write'
     const isReview = kind === 'review'
-    const adapterName = options.adapterName || 'claude-code'
+    const adapterName = options.adapterName || DEFAULT_ADAPTER_NAME
     const adapter = this.adapters.get(adapterName)
     if (!adapter) throw new Error(`에이전트 어댑터가 없습니다: ${adapterName}`)
     const machine = this.machineFor(spaceKey)

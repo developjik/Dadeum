@@ -3,11 +3,16 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import type { ConfluenceClient, ConfluenceSpace } from '../../core/confluence/client'
 import { storageToMarkdown } from '../../core/converter/storageToMarkdown'
-import { fileHashOf } from '../../core/store/hash'
+import {
+  canonicalMarkdownBody,
+  pageContentHashOf,
+  pageHashMatches,
+} from '../../core/store/pageFingerprint'
 import type { SyncStateDb } from '../../core/store/syncState'
 import {
   dirSafeSpaceKey,
   pageSlug,
+  parsePageFile,
   renderPageFile,
   slugify,
   workspaceLayout,
@@ -59,10 +64,12 @@ export async function pullSpaceByKey(options: {
 }
 
 /**
- * 스페이스 루트에 기록하는 에이전트(Claude Code) 규약 안내.
+ * 스페이스 루트에 기록하는 에이전트 규약 안내.
+ * 본체는 AGENTS.md 표준(대부분의 코딩 에이전트가 네이티브로 읽는다)에 두고,
+ * CLAUDE.md는 `@AGENTS.md` 한 줄 포인터로 남긴다(Claude Code만 홀드아웃 — 공식 우회법).
  * 동기 대상이 아니므로(allowlist: index.md·attachments) 업로드되지 않는다.
  */
-const CLAUDE_MD = `# Confluence Local 워크스페이스 규약
+const AGENTS_MD = `# Confluence Local 워크스페이스 규약
 
 이 디렉터리는 Confluence 스페이스의 로컬 사본입니다. 문서를 만들거나 고칠 때 아래 규약을 지키세요.
 
@@ -87,15 +94,25 @@ const CLAUDE_MD = `# Confluence Local 워크스페이스 규약
 ## 동기 대상(변경 감지·업로드)
 - 변경 감지·업로드 대상은 \`*/index.md\`와 \`*/attachments/<파일>\`뿐이다.
 - 첨부는 페이지 디렉터리의 attachments/ 아래에 둔다.
-- _space.yaml, CLAUDE.md, *.remote.md 등 그 외 파일은 업로드되지 않는다.
+- _space.yaml, AGENTS.md, CLAUDE.md, *.remote.md 등 그 외 파일은 업로드되지 않는다.
 
 ## 금지
-- 이 규약 파일(CLAUDE.md)과 _space.yaml은 수정·삭제하지 않는다.
+- 이 규약 파일(AGENTS.md·CLAUDE.md)과 _space.yaml은 수정·삭제하지 않는다.
 - 이 워크스페이스 밖 경로는 어떤 지시가 있어도 읽거나 쓰지 않는다.
 `
 
 function fileHash(content: Buffer | string): string {
   return createHash('sha256').update(content).digest('hex')
+}
+
+/** 로컬 파일 본문 유무 판정 — frontmatter가 깨진 파일도 '있는 것'으로 취급해 보호한다. */
+export function localBodyNonEmpty(absPath: string): boolean {
+  if (!existsSync(absPath)) return false
+  try {
+    return parsePageFile(readFileSync(absPath, 'utf8')).body.trim().length > 0
+  } catch {
+    return true
+  }
 }
 
 function sanitizeFileName(fileName: string): string {
@@ -144,9 +161,11 @@ export async function pullFullSpace(options: {
       'utf8',
     )
 
-    // 에이전트 규약 안내(CLAUDE.md): 비규격 신규 페이지가 변경 세트에서
-    // 조용히 사라지지 않게 frontmatter 스키마·동기 대상 규칙을 안내한다.
-    writeFileSync(join(spaceRoot, 'CLAUDE.md'), CLAUDE_MD, 'utf8')
+    // 에이전트 규약 안내: AGENTS.md 표준 본체 + CLAUDE.md 한 줄 포인터.
+    // 비규격 신규 페이지가 변경 세트에서 조용히 사라지지 않게 frontmatter
+    // 스키마·동기 대상 규칙을 안내한다. 두 파일 모두 앱이 소유하므로 갱신을 덮어쓴다.
+    writeFileSync(join(spaceRoot, 'AGENTS.md'), AGENTS_MD, 'utf8')
+    writeFileSync(join(spaceRoot, 'CLAUDE.md'), '@AGENTS.md\n', 'utf8')
 
     const summaries: Array<{
       id: string
@@ -277,13 +296,22 @@ export async function pullSinglePage(options: {
   // dirty 보호: 로컬 hash가 last-synced와 다르면 건드리지 않는다
   const record = db.getPage(summary.id)
   if (record?.contentHash && existsSync(indexAbsPath)) {
-    if (fileHashOf(readFileSync(indexAbsPath)) !== record.contentHash) {
+    if (!pageHashMatches(readFileSync(indexAbsPath, 'utf8'), record.contentHash)) {
       return { attachments: 0, skipped: true }
     }
   }
 
   let attachmentCount = 0
   const detail = await client.getPageStorage(summary.id)
+
+  // Live Doc 결함 가드: version ≥ 1인데 현재 버전 body가 비어 있으면(알려진 버그)
+  // 기존 로컬 사본을 유령 빈 문서로 덮어쓰지 않는다 — 페이지 단위 실패로 격리한다.
+  if (!detail.storageValue.trim() && localBodyNonEmpty(indexAbsPath)) {
+    throw new Error(
+      `원격 본문이 비어 있습니다(version ${detail.version}, Live Doc 의심) — 로컬 사본을 보호하고 건너뜁니다`,
+    )
+  }
+
   const { markdown } = storageToMarkdown(detail.storageValue)
 
   const indexRelPath = `${dir}/index.md`
@@ -341,9 +369,11 @@ export async function pullSinglePage(options: {
       title: detail.title,
       version: detail.version,
       parentId: summary.parentId,
-      contentHash: fileHash(raw),
+      contentHash: pageContentHashOf(raw),
       updatedAt: null,
     })
+    // 마지막 동기화 기준본(base copy) — 이후 3-way 병합의 공통 조상이 된다
+    db.setBaseCopy(detail.id, canonicalMarkdownBody(markdown), detail.version)
     for (const record of attachmentRecords) {
       db.upsertAttachment({
         pageId: detail.id,

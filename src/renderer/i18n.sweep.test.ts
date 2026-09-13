@@ -30,7 +30,7 @@ const HANGUL = /[\uac00-\ud7a3]/
 describe('한국어 문안 단일 소스(AC-12 정적 검증)', () => {
   it('renderer/src UI 코드에 한글 리터럴이 없다(모두 ko.ts 경유)', () => {
     const dir = join(__dirname, 'src')
-    const files = collectFiles(dir).filter((file) => !file.endsWith('.test.ts'))
+    const files = collectFiles(dir).filter((file) => !/\.test\.tsx?$/.test(file))
     expect(files.length).toBeGreaterThan(0)
 
     const offenders = files

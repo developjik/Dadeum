@@ -1,5 +1,5 @@
 import { create } from 'zustand'
-import type { AgentRunEvent } from '../../../core/agent/types'
+import type { AgentDescriptor, AgentRunEvent } from '../../../core/agent/types'
 import type { ConfluenceSpace } from '../../../core/confluence/types'
 import { ko } from '../../../core/i18n/ko'
 import { renderPreviewHtml } from '../../../core/preview/render'
@@ -20,6 +20,18 @@ export interface SelectedPage {
   html: string
 }
 
+/**
+ * 직접 편집 세션 — 문서 경로에 귀속된다. 페이지 이동으로 파괴되지 않으며
+ * (selected.path === editing.path일 때만 노출), dirty 판정은 baseline과 비교한다.
+ */
+interface EditSession {
+  path: string
+  /** 저장 기준 본문(더티 판정·충돌 감지 기준) */
+  baseline: string
+  body: string
+  saving: boolean
+}
+
 /** 폴링 결과 알림(main → sync:event). */
 interface SyncPollEvent {
   type: 'poll'
@@ -34,20 +46,35 @@ interface AppUiState {
   status: AuthStatus
   baseUrl?: string
   email?: string
+  /**
+   * 저장된 자격증명은 있으나 토큰 복호화에 실패한 경우의 프리필 값 —
+   * 연결 화면에서 사이트 주소·이메일을 채운 채 시작하고 토큰만 요청한다.
+   */
+  lastCredentials?: { baseUrl: string; email: string }
   spaces: ConfluenceSpace[]
   tree: PageTreeNode[]
   selected: SelectedPage | null
   /** 문서 열기(openPage) 왕복 진행 중 — 미리보기 헤더의 로딩 표시용 */
   pageLoading: boolean
+  /** 직접 편집 세션(없으면 미리보기 모드) */
+  editing: EditSession | null
+  /** beginEdit 왕복 진행 중 — 에디터 진입 로딩 표시용 */
+  editLoading: boolean
   error?: string
   /** 자동으로 사라지는 성공·동기화 알림 */
   notice?: string
   busy: boolean
   syncingSpace?: string
   syncingProgress?: { spaceKey: string; done: number; total: number }
+  /** 마지막 자동 폴링 실패 사유 — 헤더 상태 점이 경고색으로 바뀐다(성공 폴링 시 해제). */
+  syncError?: string
   activeSpaceKey?: string
   chatMessages: Array<{ role: 'user' | 'assistant' | 'system'; text: string }>
   agentRunning: boolean
+  /** agent:list로 발견한 에이전트(설치 여부·기능 포함) — 선택 UI 원천 */
+  agents: AgentDescriptor[]
+  /** 현재 스페이스가 쓰는 에이전트(서버 저장값, 없으면 기본 어댑터) */
+  selectedAgent?: string
   activeRunId?: string
   /** agent:run IPC 왕복이 진행 중이다(왕복 내 중지 요청은 플래그로 큐잉). */
   agentStarting: boolean
@@ -79,18 +106,24 @@ interface AppUiState {
   runReview: (spaceKey: string, instruction: string) => Promise<void>
   loadTree: (spaceKey: string) => Promise<void>
   openPage: (path: string) => Promise<void>
+  beginEdit: (path: string) => Promise<void>
+  setEditBody: (body: string) => void
+  saveEdit: () => Promise<void>
+  cancelEdit: () => void
   openExternal: (url: string) => Promise<void>
   cancelAgent: () => Promise<void>
   checkUpdate: () => Promise<void>
   selectSpace: (spaceKey: string) => Promise<void>
   sendChat: (prompt: string) => Promise<void>
+  loadAgents: (spaceKey: string) => Promise<void>
+  selectAgent: (spaceKey: string, adapterName: string) => Promise<void>
   loadChangeset: (spaceKey: string) => Promise<void>
   approveUpload: (spaceKey: string, paths: string[]) => Promise<void>
   openDiff: (path: string) => Promise<void>
   loadConflicts: (spaceKey: string) => Promise<void>
   resolveConflict: (
     candidate: { pageId: string; path: string; reason: string },
-    choice: 'overwrite' | 'take-remote' | 'manual',
+    choice: 'overwrite' | 'keep-both' | 'take-remote' | 'manual',
   ) => Promise<void>
 }
 
@@ -99,12 +132,34 @@ async function api<T>(channel: string, payload?: unknown): Promise<T> {
   return window.confluenceLocal.invoke(channel, payload) as Promise<T>
 }
 
+/** 마지막으로 선택한 스페이스 키(재실행 시 복원용). localStorage 접근은
+ * 스토리지가 없는 테스트 환경을 고려해 가드한다. */
+const LAST_SPACE_KEY_STORAGE = 'space.last'
+
+function persistLastSpaceKey(spaceKey: string): void {
+  try {
+    window.localStorage.setItem(LAST_SPACE_KEY_STORAGE, spaceKey)
+  } catch {
+    // 저장 실패는 복원 기능만 죽는다(앱 동작에는 무해)
+  }
+}
+
+function readLastSpaceKey(): string | null {
+  try {
+    return window.localStorage.getItem(LAST_SPACE_KEY_STORAGE)
+  } catch {
+    return null
+  }
+}
+
 let agentUnsubscribe: (() => void) | null = null
 let syncUnsubscribe: (() => void) | null = null
 let updateUnsubscribe: (() => void) | null = null
 let noticeTimer: ReturnType<typeof setTimeout> | undefined
 /** openPage 응답 경쟁 가드 — 마지막 선택만 화면에 반영한다. */
 let openPageSeq = 0
+/** beginEdit 응답 경쟁 가드 — 마지막 요청의 세션만 남긴다. */
+let beginEditSeq = 0
 
 function appendSystemMessage(text: string): void {
   const { chatMessages } = useAppStore.getState()
@@ -173,6 +228,20 @@ function spaceKeyOfAuthError(payload: unknown): string {
     return typeof key === 'string' ? key : ''
   }
   return ''
+}
+
+/** main → sync:event의 sync-error 변형 판별(폴링 실패 안내). 사유가 없으면 빈 문자열. */
+function syncErrorMessageOf(payload: unknown): string | null {
+  if (
+    typeof payload !== 'object' ||
+    payload === null ||
+    !('type' in payload) ||
+    payload.type !== 'sync-error'
+  ) {
+    return null
+  }
+  if (!('message' in payload) || typeof payload.message !== 'string') return ''
+  return payload.message
 }
 
 /** main → sync:event의 pull-progress 변형(진행률 표시용). */
@@ -273,8 +342,20 @@ export function ensureAgentEventSubscription(): void {
         useAppStore.setState({ error: ko.sync.authExpired(spaceKeyOfAuthError(payload)) })
         return
       }
+      // 폴링 실패(네트워크·서버 오류): 상태 점을 경고로 바꾸고 자동 소멸 알림으로 알린다.
+      // 스케줄러가 백오프하며 자동 재시도하므로 스티키 에러 배너는 쓰지 않는다.
+      const syncErrorMessage = syncErrorMessageOf(payload)
+      if (syncErrorMessage !== null) {
+        useAppStore.setState({ syncError: syncErrorMessage || ko.sync.degraded })
+        showNotice(ko.sync.degradedNotice(syncErrorMessage || ko.sync.degraded))
+        return
+      }
       const event = payload as SyncPollEvent
       if (event?.type !== 'poll') return
+      // 폴링 성공은 저하 상태를 해제한다(활성 스페이스와 무관하게).
+      if (useAppStore.getState().syncError !== undefined) {
+        useAppStore.setState({ syncError: undefined })
+      }
       const state = useAppStore.getState()
       if (event.spaceKey !== state.activeSpaceKey) return
       // 백그라운드 동기화 결과를 트리·충돌 후보에 즉시 반영
@@ -316,6 +397,7 @@ export const useAppStore = create<AppUiState>((set, get) => ({
   selected: null,
   busy: false,
   chatMessages: [],
+  agents: [],
   agentRunning: false,
   agentStarting: false,
   agentStartAborted: false,
@@ -329,6 +411,8 @@ export const useAppStore = create<AppUiState>((set, get) => ({
   conflicts: [],
   notice: undefined,
   pageLoading: false,
+  editing: null,
+  editLoading: false,
 
   dismissError: () => {
     set({ error: undefined })
@@ -342,17 +426,37 @@ export const useAppStore = create<AppUiState>((set, get) => ({
 
   refreshStatus: async () => {
     try {
-      const status = await api<{ connected: boolean; baseUrl?: string; email?: string }>(
-        'auth:status',
-      )
+      const status = await api<{
+        connected: boolean
+        baseUrl?: string
+        email?: string
+        reason?: 'token-decrypt-failed'
+      }>('auth:status')
       if (status.connected) {
         set({ status: 'connected', baseUrl: status.baseUrl, email: status.email, error: undefined })
         await get().loadSpaces()
+        // 마지막으로 선택한 스페이스 복원 — 목록에 없으면(삭제 등) 빈 상태로 둔다
+        const last = readLastSpaceKey()
+        if (last && get().spaces.some((space) => space.key === last)) {
+          await get().selectSpace(last)
+        }
       } else {
-        set({ status: 'disconnected', spaces: [], tree: [] })
+        set({
+          status: 'disconnected',
+          spaces: [],
+          tree: [],
+          lastCredentials:
+            status.baseUrl && status.email
+              ? { baseUrl: status.baseUrl, email: status.email }
+              : undefined,
+        })
       }
     } catch (cause) {
-      set({ status: 'disconnected', error: String(cause instanceof Error ? cause.message : cause) })
+      set({
+        status: 'disconnected',
+        lastCredentials: undefined,
+        error: String(cause instanceof Error ? cause.message : cause),
+      })
     }
   },
 
@@ -372,6 +476,7 @@ export const useAppStore = create<AppUiState>((set, get) => ({
         baseUrl: result.baseUrl,
         email: result.email,
         spaces: result.spaces,
+        lastCredentials: undefined,
       })
       // 첫 스페이스를 자동으로 전량 풀하지 않는다 — 수천 페이지 팀 스페이스에서
       // 사용자 동의 없이 수 분짜리 다운로드가 시작되는 문제가 있었다(실기기 E2E).
@@ -398,6 +503,10 @@ export const useAppStore = create<AppUiState>((set, get) => ({
         spaces: [],
         tree: [],
         selected: null,
+        editing: null,
+        editLoading: false,
+        // 직접 연결 해제는 프리필 없이 빈 연결 화면으로 시작한다
+        lastCredentials: undefined,
       })
     } finally {
       set({ busy: false })
@@ -451,6 +560,7 @@ export const useAppStore = create<AppUiState>((set, get) => ({
 
   selectSpace: async (spaceKey) => {
     ensureAgentEventSubscription()
+    persistLastSpaceKey(spaceKey)
     // 이전 스페이스에서 진행 중이던 미리보기 렌더 무효화
     openPageSeq++
     // 검토 상태는 스페이스에 귀속 — 잔류 시 이전 스페이스 변경을 새 스페이스로 오승인할 수 있다
@@ -499,6 +609,33 @@ export const useAppStore = create<AppUiState>((set, get) => ({
         agentStartAborted: false,
         error: String(cause instanceof Error ? cause.message : cause),
       })
+    }
+  },
+
+  /** 스페이스의 에이전트 목록·선택을 불러온다(선택 UI 갱신용 — 실패는 조용히 무시). */
+  loadAgents: async (spaceKey) => {
+    try {
+      const result = await api<{ agents?: AgentDescriptor[]; selected?: string }>('agent:list', {
+        spaceKey,
+      })
+      // main 경계 밖(테스트 목 등)에서는 응답 스키마가 비어 있을 수 있다
+      if (!Array.isArray(result.agents)) return
+      set({
+        agents: result.agents,
+        selectedAgent: typeof result.selected === 'string' ? result.selected : undefined,
+      })
+    } catch {
+      // 에이전트 선택은 부가 기능 — 목록 조회 실패를 에러 배너로 세우지 않는다
+    }
+  },
+
+  /** 스페이스가 쓸 에이전트를 서버에 저장한다(이후 agent:run이 이 값을 따른다). */
+  selectAgent: async (spaceKey, adapterName) => {
+    try {
+      await api('agent:select', { spaceKey, adapterName })
+      set({ selectedAgent: adapterName, error: undefined })
+    } catch (cause) {
+      set({ error: String(cause instanceof Error ? cause.message : cause) })
     }
   },
 
@@ -665,6 +802,77 @@ export const useAppStore = create<AppUiState>((set, get) => ({
       if (seq !== openPageSeq) return
       set({ error: String(cause instanceof Error ? cause.message : cause), pageLoading: false })
     }
+  },
+
+  /**
+   * 직접 편집 시작 — 디스크 원문을 새로 읽어 세션을 만든다(오래된 본문 편집 방지).
+   * 페이지 이동은 세션을 파괴하지 않으므로 확인이 필요 없고, 다른 문서의
+   * 저장 안 된 세션이 남아 있을 때만 새 세션 시작을 게이트한다(무손실 원칙).
+   */
+  beginEdit: async (path) => {
+    const current = get().editing
+    if (current && current.path !== path && current.body !== current.baseline) {
+      set({ error: ko.editor.blockedByOtherDraft })
+      return
+    }
+    const seq = ++beginEditSeq
+    set({ editLoading: true })
+    try {
+      const result = await api<{ markdown: string }>('pages:read', { path })
+      if (seq !== beginEditSeq) return
+      set({
+        editing: { path, baseline: result.markdown, body: result.markdown, saving: false },
+        editLoading: false,
+      })
+    } catch (cause) {
+      if (seq !== beginEditSeq) return
+      set({
+        error: `${ko.editor.loadFailed} — ${cause instanceof Error ? cause.message : String(cause)}`,
+        editLoading: false,
+      })
+    }
+  },
+
+  setEditBody: (body) => {
+    const current = get().editing
+    if (!current) return
+    set({ editing: { ...current, body } })
+  },
+
+  /** 편집 저장 — pages:write 후 미리보기를 갱신하고 검토 배지(changeset)를 재검사한다. */
+  saveEdit: async () => {
+    const current = get().editing
+    if (!current || current.saving) return
+    set({ editing: { ...current, saving: true } })
+    try {
+      const result = await api<{
+        title: string
+        url: string
+        version: number
+        markdown: string
+      }>('pages:write', { path: current.path, body: current.body })
+      const html = await renderPreviewHtml(result.markdown)
+      set((state) => ({
+        editing: null,
+        selected:
+          state.selected && state.selected.path === current.path
+            ? { ...state.selected, title: result.title, version: result.version, html }
+            : state.selected,
+      }))
+      showNotice(ko.editor.savedNotice)
+      const spaceKey = get().activeSpaceKey
+      if (spaceKey) void get().loadChangeset(spaceKey)
+    } catch (cause) {
+      // 저장 실패 시 세션과 입력을 보존한다(재시도 가능해야 한다)
+      const still = get().editing
+      if (still && still.path === current.path) set({ editing: { ...still, saving: false } })
+      set({ error: String(cause instanceof Error ? cause.message : cause) })
+    }
+  },
+
+  /** 편집 취소(폐기) — 확인 대화상자는 호출하는 Editor 컴포넌트의 인라인 확인이 담당한다. */
+  cancelEdit: () => {
+    set({ editing: null })
   },
 
   openExternal: async (url) => {

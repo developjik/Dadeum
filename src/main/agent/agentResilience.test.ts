@@ -96,6 +96,13 @@ describe('ChatRunService 락 복구', () => {
     const service = new ChatRunService()
     const broken: AgentAdapter = {
       name: 'broken',
+      discover: () => null,
+      capabilities: () => ({
+        supportsResume: false,
+        supportsScopedWrite: false,
+        supportsJsonReview: false,
+        supportsStreaming: false,
+      }),
       start: () => {
         throw new Error('부팅 실패')
       },
@@ -130,7 +137,17 @@ describe('ChatRunService 락 복구', () => {
       terminal: Promise.resolve('completed'),
       cancel: () => undefined,
     }
-    service.registerAdapter({ name: 'fake', start: () => handleLike })
+    service.registerAdapter({
+      name: 'fake',
+      discover: () => ({ command: '/usr/bin/fake' }),
+      capabilities: () => ({
+        supportsResume: true,
+        supportsScopedWrite: false,
+        supportsJsonReview: true,
+        supportsStreaming: true,
+      }),
+      start: () => handleLike,
+    })
     const sender = { isDestroyed: () => true } as unknown as WebContents
     const { runId } = service.startRun({
       sender,

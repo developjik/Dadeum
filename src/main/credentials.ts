@@ -69,6 +69,11 @@ export interface ConnectionStatus {
   connected: boolean
   baseUrl?: string
   email?: string
+  /**
+   * 파일은 있으나 토큰 복호화 실패(앱 서명 변경 등) — 미연결이지만
+   * 주소·이메일은 평문으로 저장돼 있으므로 연결 화면 프리필로 돌려준다.
+   */
+  reason?: 'token-decrypt-failed'
 }
 
 export function getConnectionStatus(): ConnectionStatus {
@@ -79,7 +84,12 @@ export function getConnectionStatus(): ConnectionStatus {
   try {
     decryptToken(safeStorageEncryptor, stored.tokenCiphertextBase64)
   } catch {
-    return { connected: false }
+    return {
+      connected: false,
+      baseUrl: stored.baseUrl,
+      email: stored.email,
+      reason: 'token-decrypt-failed',
+    }
   }
   return { connected: true, baseUrl: stored.baseUrl, email: stored.email }
 }

@@ -1,8 +1,9 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ConfluenceClient } from '../../core/confluence/client'
+import { pageContentHashOf } from '../../core/store/pageFingerprint'
 import { SyncStateDb } from '../../core/store/syncState'
 import { isSyncTarget } from '../../core/store/workspace'
 import { pullFullSpace } from './pullService'
@@ -14,7 +15,8 @@ function jsonResponse(init: { status?: number; body?: unknown }): Response {
   })
 }
 
-function fakeClient(): ConfluenceClient {
+function fakeClient(overrides?: { emptyBodyPages?: string[] }): ConfluenceClient {
+  const emptyBodyPages = new Set(overrides?.emptyBodyPages ?? [])
   const attachments = [
     { id: 'att-1', title: 'logo.png', metadata: { mediaType: { name: 'image/png' } } },
   ]
@@ -43,7 +45,11 @@ function fakeClient(): ConfluenceClient {
             id: '990001',
             title: '루트 페이지',
             version: { number: 3 },
-            body: { storage: { value: '<h1>루트</h1><p>내용</p>' } },
+            body: {
+              storage: {
+                value: emptyBodyPages.has('990001') ? '' : '<h1>루트</h1><p>내용</p>',
+              },
+            },
           },
         })
       }
@@ -115,11 +121,50 @@ describe('pullFullSpace(연결 시 전체 pull, ef-13)', () => {
     const p1 = db.getPage('990001')
     expect(p1?.path).toBe('spaces/DEV/루트-페이지/index.md')
     expect(p1?.version).toBe(3)
+    // 기준본(base copy)이 기록된다 — 3-way 병합의 공통 조상
+    expect(p1?.baseVersion).toBe(3)
+    expect(p1?.baseBody).toContain('# 루트')
 
     // 생성된 모든 index.md는 동기 대상 allowlist에 부합한다
     expect(isSyncTarget('spaces/DEV/루트-페이지/index.md')).toBe(true)
     expect(isSyncTarget('spaces/DEV/루트-페이지/attachments/logo.png')).toBe(true)
 
+    db.close()
+  })
+
+  it('Live Doc 결함(빈 원격 본문)에서는 기존 로컬 사본을 덮어쓰지 않는다', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'confluence-pull-empty-'))
+    mkdirSync(join(root, '.sync'), { recursive: true })
+    const db = new SyncStateDb(join(root, '.sync', 'sync-state.db'))
+
+    // 1차 pull과 동일한 로컬 사본 + 정합 db 상태를 미리 구성한다
+    const relPath = 'spaces/DEV/루트-페이지/index.md'
+    mkdirSync(join(root, 'spaces/DEV/루트-페이지'), { recursive: true })
+    const raw =
+      '---\npageId: "990001"\nspaceKey: "DEV"\ntitle: "루트 페이지"\nversion: 3\nparentId: null\nurl: "https://acme.atlassian.net/wiki/spaces/DEV/pages/990001"\nupdatedAt: null\nsyncedAt: null\n---\n\n# 루트\n\n내용'
+    writeFileSync(join(root, relPath), raw, 'utf8')
+    db.upsertPage({
+      pageId: '990001',
+      spaceKey: 'DEV',
+      path: relPath,
+      title: '루트 페이지',
+      version: 3,
+      parentId: null,
+      contentHash: pageContentHashOf(raw),
+    })
+
+    // 원격 990001가 빈 body를 반환하는 상태(Live Doc 빈 현재-버전 버그)에서 재 pull
+    const result = await pullFullSpace({
+      client: fakeClient({ emptyBodyPages: ['990001'] }),
+      space: { id: 'sp-1', key: 'DEV', name: '개발' },
+      workspaceRoot: root,
+      db,
+    })
+
+    expect(result.failed.map((failure) => failure.pageId)).toEqual(['990001'])
+    expect(result.failed[0]?.error).toContain('비어')
+    // 로컬 사본은 보호된다 — 유령 빈 문서로 덮어써지지 않는다
+    expect(readFileSync(join(root, relPath), 'utf8')).toContain('# 루트')
     db.close()
   })
 })

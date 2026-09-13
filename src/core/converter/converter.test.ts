@@ -60,6 +60,64 @@ describe('storageToMarkdown', () => {
     expect(markdown).toContain('<!-- confluence:carriers -->')
     expect(markdown).toContain('<ac:link>')
   })
+  it('스타일 있는 span(색상 등)은 캐리어로 승격되어 왕복 무손실이다', () => {
+    const storage = '<p>이것은 <span style="color: rgb(255,0,0);">빨간 텍스트</span>입니다</p>'
+    const { markdown, promotedInlineCount } = storageToMarkdown(storage)
+
+    expect(promotedInlineCount).toBe(1)
+    expect(markdown).toMatch(/⟦confluence-ref:[0-9a-f]+⟧/)
+    expect(markdown).toContain('<!-- confluence:carriers -->')
+    expect(markdown).toContain('style="color: rgb(255,0,0);"')
+    expectRoundTripLossless(storage)
+  })
+  it('class 있는 span도 캐리어로 승격되어 왕복 무손실이다', () => {
+    const storage = '<p><span class="css-abc123">클래스 스팬</span> 텍스트</p>'
+    const { promotedInlineCount } = storageToMarkdown(storage)
+
+    expect(promotedInlineCount).toBe(1)
+    expectRoundTripLossless(storage)
+  })
+  it('속성 없는 span은 여전히 내용만 마크다운으로 내보낸다', () => {
+    const { markdown, promotedInlineCount } = storageToMarkdown('<p>평범한 <span>스팬</span></p>')
+    expect(markdown).toContain('평범한 스팬')
+    expect(promotedInlineCount).toBe(0)
+  })
+  it('인라인 <br>·<u>·<kbd>는 storage 태그로 통과한다', () => {
+    expect(markdownToStorage('줄바꿈<br>다음 줄')).toContain('<br/>')
+    expect(markdownToStorage('<u>밑줄</u> 강조')).toContain('<u>밑줄</u>')
+    expect(markdownToStorage('<kbd>Ctrl</kbd> 키')).toContain('<kbd>Ctrl</kbd>')
+    // 통과 목록 밖의 인라인 태그는 리터럴 텍스트로 이스케이프된다
+    expect(markdownToStorage('a <marquee>x</marquee> b')).not.toContain('<marquee>x')
+  })
+  it('통과 목록 태그라도 script·이벤트 핸들러는 제거된다', () => {
+    expect(markdownToStorage('x <script>alert(1)</script> y')).not.toContain('<script')
+    expect(markdownToStorage('<u onclick="evil()">클릭</u>')).not.toContain('onclick')
+    expect(markdownToStorage('<u onclick="evil()">클릭</u>')).toContain('<u>')
+  })
+  it('GFM 표 정렬(left/center/right)은 align 속성으로 왕복 무손실이다', () => {
+    const storage =
+      '<table><tbody><tr><th align="left">이름</th><th align="center">값</th><th align="right">비고</th></tr><tr><td align="left">a</td><td align="center">1</td><td align="right">x</td></tr></tbody></table>'
+    const { markdown } = storageToMarkdown(storage)
+    expect(markdown).toContain(':---')
+    expect(markdown).toContain(':---:')
+    expect(markdown).toContain('---:')
+    expectRoundTripLossless(storage)
+  })
+  it('열 내 정렬이 섞인 표는 캐리어로 승격되어 왕복 무손실이다', () => {
+    const storage =
+      '<table><tbody><tr><th align="left">A</th></tr><tr><td align="right">1</td></tr></tbody></table>'
+    const { markdown } = storageToMarkdown(storage)
+    expect(markdown).toContain('confluence-storage')
+    expectRoundTripLossless(storage)
+  })
+  it('마크다운에서 작성한 정렬 표는 align 속성이 붙는다', () => {
+    const md = '| a | b |\n| :--- | ---: |\n| 1 | 2 |'
+    const storage = markdownToStorage(md)
+    expect(storage).toContain('<th align="left">a</th>')
+    expect(storage).toContain('<th align="right">b</th>')
+    expect(storage).toContain('<td align="left">1</td>')
+    expect(storage).toContain('<td align="right">2</td>')
+  })
   it('CDATA 내부의 named entity를 치환하지 않는다(코드 매크로 보존)', () => {
     const cdata = '<![CDATA[a&nbsp;b &copy; 2026]]>'
     const macro = `<ac:structured-macro ac:name="code"><ac:plain-text-body>${cdata}</ac:plain-text-body></ac:structured-macro>`

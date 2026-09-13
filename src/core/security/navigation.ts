@@ -11,6 +11,14 @@ export interface NavigationPolicy {
   allowedFilePathPrefix?: string
 }
 
+/** file: URL pathname과 로컬 경로 접두사를 같은 형식(슬래시 통일)으로 맞춘다. */
+function normalizeForCompare(value: string): string {
+  const slashes = value.replace(/\\/g, '/')
+  // Windows file: URL은 '/C:/…'처럼 드라이브 문자 앞에 선행 슬래시가 붙는다 —
+  // node:path 접두사('C:\…' → 'C:/…')와 비교하기 위해 잘라낸다.
+  return /^\/[A-Za-z]:\//.test(slashes) ? slashes.slice(1) : slashes
+}
+
 export function isAllowedNavigation(url: string, policy: NavigationPolicy = {}): boolean {
   let parsed: URL
   try {
@@ -24,12 +32,16 @@ export function isAllowedNavigation(url: string, policy: NavigationPolicy = {}):
     if (!prefix) return false
     let localPath: string
     try {
-      localPath = decodeURIComponent(parsed.pathname)
+      localPath = normalizeForCompare(decodeURIComponent(parsed.pathname))
     } catch {
       return false
     }
+    const normalizedPrefix = normalizeForCompare(prefix)
     return (
-      localPath === prefix || localPath.startsWith(prefix.endsWith('/') ? prefix : `${prefix}/`)
+      localPath === normalizedPrefix ||
+      localPath.startsWith(
+        normalizedPrefix.endsWith('/') ? normalizedPrefix : `${normalizedPrefix}/`,
+      )
     )
   }
   if (policy.dev && parsed.protocol === 'http:') {

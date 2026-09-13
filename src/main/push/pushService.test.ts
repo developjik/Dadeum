@@ -16,10 +16,18 @@ const PAGE = {
 
 function makeClient(overrides?: {
   updateVersion?: number
-  failUpdate?: boolean
+  failUpdate?: number
+  remoteAttachments?: Array<{ id: string; fileName: string }>
+  /** PUT은 성공하지만 재GET이 옛 내용을 돌려주는 침묵 no-op 시뮬레이션 */
+  silentNoop?: boolean
 }): ConfluenceClient {
   const updateVersion = overrides?.updateVersion
   const failUpdate = overrides?.failUpdate
+  const remoteAttachments = overrides?.remoteAttachments ?? []
+  const silentNoop = overrides?.silentNoop ?? false
+  // 실제 서버처럼: PUT이 저장한 내용·버전을 이후 GET(반영 검증)이 되돌려본다
+  let storedStorage = PAGE.body.storage.value
+  let storedVersion = updateVersion ?? PAGE.version.number
   return new ConfluenceClient({
     baseUrl: 'https://acme.atlassian.net',
     email: 'dev@acme.io',
@@ -30,9 +38,12 @@ function makeClient(overrides?: {
       const method = init?.method ?? 'GET'
       if (url.includes('/api/v2/pages/1001') && method === 'GET') {
         return new Response(
-          JSON.stringify(
-            updateVersion !== undefined ? { ...PAGE, version: { number: updateVersion } } : PAGE,
-          ),
+          JSON.stringify({
+            id: '1001',
+            title: '가이드',
+            version: { number: storedVersion },
+            body: { storage: { value: storedStorage } },
+          }),
           {
             status: 200,
             headers: { 'Content-Type': 'application/json' },
@@ -40,13 +51,31 @@ function makeClient(overrides?: {
         )
       }
       if (url.includes('/api/v2/pages/1001') && method === 'PUT') {
-        if (failUpdate) return new Response('server boom', { status: 500 })
-        const requested = JSON.parse(String(init?.body)) as { version: { number: number } }
+        if (failUpdate === 500) return new Response('server boom', { status: 500 })
+        if (failUpdate === 409) return new Response('conflict', { status: 409 })
+        const requested = JSON.parse(String(init?.body)) as {
+          version: { number: number }
+          body: { value: string }
+        }
+        storedVersion = requested.version.number
+        if (!silentNoop) storedStorage = requested.body.value
         return new Response(
           JSON.stringify({
             id: '1001',
             title: '가이드',
             version: { number: requested.version.number },
+          }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      if (url.includes('/rest/api/content/1001/child/attachment') && method === 'GET') {
+        return new Response(
+          JSON.stringify({
+            results: remoteAttachments.map((item) => ({
+              id: item.id,
+              title: item.fileName,
+              metadata: { mediaType: { name: 'application/octet-stream' } },
+            })),
           }),
           { status: 200, headers: { 'Content-Type': 'application/json' } },
         )
@@ -157,6 +186,84 @@ describe('pushApprovedPages', () => {
     })
     expect(outcome.failed[0]?.error).toContain('push할 수 없습니다')
     expect(outcome.uploaded).toHaveLength(0)
+  })
+
+  it('PUT 409(사전 검사와 PUT 사이 원격 변경)는 충돌로 분류한다', async () => {
+    const { root, db, machine, relPath } = setup()
+    const snapshot = freshSnapshot(join(root, relPath))
+    const outcome = await pushApprovedPages({
+      // GET은 version 2로 응답(사전 검사 통과)하지만 PUT은 409 — TOCTOU 창 재현
+      client: makeClient({ failUpdate: 409 }),
+      workspaceRoot: root,
+      db,
+      machine,
+      snapshot,
+      approvedPaths: [relPath],
+      spaceId: 'sp-1',
+    })
+    expect(outcome.uploaded).toHaveLength(0)
+    expect(outcome.conflicts).toEqual([{ path: relPath, pageId: '1001', remoteVersion: 2 }])
+  })
+
+  it('PUT은 성공했지만 서버에 다른 내용이 저장되면 반영 검증 실패로 보고한다(침묵 no-op 방지)', async () => {
+    const { root, db, machine, relPath } = setup()
+    const snapshot = freshSnapshot(join(root, relPath))
+    const outcome = await pushApprovedPages({
+      client: makeClient({ silentNoop: true }),
+      workspaceRoot: root,
+      db,
+      machine,
+      snapshot,
+      approvedPaths: [relPath],
+      spaceId: 'sp-1',
+    })
+    expect(outcome.uploaded).toHaveLength(0)
+    expect(outcome.failed[0]?.error).toContain('반영 검증 실패')
+    // 파일·db가 옛 상태로 남아 다음 검토에서 다시 잡힌다
+    expect(readFileSync(join(root, relPath), 'utf8')).toContain('version: 2')
+  })
+
+  it('첨부 디렉터리째 삭제하면 동기화된 원격 첨부를 삭제한다', async () => {
+    const { root, db, machine, relPath } = setup()
+    // 과거에 pull로 동기화된 첨부 기록 + 로컬에는 attachments/ 디렉터리 자체가 없음
+    db.upsertAttachment({
+      pageId: '1001',
+      fileName: 'diagram.png',
+      mediaType: 'application/octet-stream',
+      fileHash: 'deadbeef',
+    })
+    const snapshot = freshSnapshot(join(root, relPath))
+    const outcome = await pushApprovedPages({
+      client: makeClient({ remoteAttachments: [{ id: 'att-7', fileName: 'diagram.png' }] }),
+      workspaceRoot: root,
+      db,
+      machine,
+      snapshot,
+      approvedPaths: [relPath],
+      spaceId: 'sp-1',
+    })
+    expect(outcome.deletedAttachments).toEqual([
+      { path: relPath.replace('index.md', 'attachments/diagram.png'), fileName: 'diagram.png' },
+    ])
+    expect(db.listAttachmentsByPage('1001')).toHaveLength(0)
+  })
+
+  it('한 번도 동기화된 적 없는 원격 첨부는 디렉터리가 없어도 보존·보고한다', async () => {
+    const { root, db, machine, relPath } = setup()
+    const snapshot = freshSnapshot(join(root, relPath))
+    const outcome = await pushApprovedPages({
+      client: makeClient({ remoteAttachments: [{ id: 'att-9', fileName: 'unknown.bin' }] }),
+      workspaceRoot: root,
+      db,
+      machine,
+      snapshot,
+      approvedPaths: [relPath],
+      spaceId: 'sp-1',
+    })
+    expect(outcome.deletedAttachments).toHaveLength(0)
+    expect(outcome.skippedRemoteAttachments).toEqual([
+      { path: relPath.replace('index.md', 'attachments/unknown.bin'), fileName: 'unknown.bin' },
+    ])
   })
 })
 

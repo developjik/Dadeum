@@ -32,6 +32,9 @@ function makeClient(
   captured: Captured,
   remoteAttachments: Array<{ id: string; title: string }>,
 ): ConfluenceClient {
+  // 실제 서버처럼: PUT이 저장한 내용·버전을 이후 GET(반영 검증)이 되돌려본다
+  let storedStorage = REMOTE_PAGE.body.storage.value
+  let storedVersion = REMOTE_PAGE.version.number
   return new ConfluenceClient({
     baseUrl: 'https://acme.atlassian.net',
     email: 'dev@acme.io',
@@ -41,14 +44,27 @@ function makeClient(
       const url = String(input)
       const method = init?.method ?? 'GET'
       if (url.includes('/api/v2/pages/1001') && method === 'GET') {
-        return new Response(JSON.stringify(REMOTE_PAGE), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
+        return new Response(
+          JSON.stringify({
+            id: '1001',
+            title: REMOTE_PAGE.title,
+            version: { number: storedVersion },
+            body: { storage: { value: storedStorage } },
+          }),
+          {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          },
+        )
       }
       if (url.includes('/api/v2/pages/1001') && method === 'PUT') {
         captured.putBody = JSON.parse(String(init?.body)) as Record<string, unknown>
-        const requested = captured.putBody as { version: { number: number } }
+        const requested = captured.putBody as unknown as {
+          version: { number: number }
+          body: { value: string }
+        }
+        storedVersion = requested.version.number
+        storedStorage = requested.body.value
         return new Response(
           JSON.stringify({
             id: '1001',
@@ -289,6 +305,8 @@ describe('업로드 루프 중 변경 재검증(P1 TOCTOU)', () => {
       ),
     }
     let putB = false
+    // PUT이 저장한 내용·버전을 재GET 검증이 읽도록 상태 저장형으로 둔다(실제 서버처럼)
+    const stored = new Map<string, { version: number; storage: string }>()
     const client = new ConfluenceClient({
       baseUrl: 'https://acme.atlassian.net',
       email: 'dev@acme.io',
@@ -304,6 +322,11 @@ describe('업로드 루프 중 변경 재검증(P1 TOCTOU)', () => {
             `${readFileSync(join(root, relB), 'utf8')}\n<!-- 외부 편집 -->`,
             'utf8',
           )
+          const requested = JSON.parse(String(init?.body)) as {
+            version: { number: number }
+            body: { value: string }
+          }
+          stored.set('1001', { version: requested.version.number, storage: requested.body.value })
           return jsonResponse({ id: '1001', title: '페이지1001', version: { number: 3 } })
         }
         if (url.includes('/api/v2/pages/1002') && method === 'PUT') {
@@ -312,11 +335,12 @@ describe('업로드 루프 중 변경 재검증(P1 TOCTOU)', () => {
         }
         const match = /\/api\/v2\/pages\/(\d+)/.exec(url)
         if (match) {
+          const saved = stored.get(match[1]!)
           return jsonResponse({
             id: match[1],
             title: `페이지${match[1]}`,
-            version: { number: 2 },
-            body: { storage: { value: '<p>원격</p>' } },
+            version: { number: saved?.version ?? 2 },
+            body: { storage: { value: saved?.storage ?? '<p>원격</p>' } },
           })
         }
         if (url.includes('/child/attachment')) return jsonResponse({ results: [] })

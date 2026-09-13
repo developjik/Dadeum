@@ -43,6 +43,16 @@ export function startAutoPull(options: {
       const machine = machineFor(space.key)
       return machine.current === 'agent-run' || machine.current === 'pushing'
     },
+    // 폴링 실패(401 제외 — onPoll 안에서 방송·스케줄 중단됨)를 사용자에게 보인다.
+    // 스케줄러가 연속 실패 백오프로 재시도 간격을 늘린다.
+    onError: (error) => {
+      if (error instanceof ConfluenceApiError && error.kind === 'unauthorized') return
+      broadcastSyncEvent({
+        type: 'sync-error',
+        spaceKey: space.key,
+        message: error instanceof Error ? error.message : String(error),
+      })
+    },
     onPoll: async () => {
       const sinceIso = beginIncrementalPull(db, space.key)
       let result: IncrementalPullResult

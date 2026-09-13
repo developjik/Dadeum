@@ -9,6 +9,18 @@ describe('IPC channel whitelist', () => {
     expect(isWhitelistedChannel('node:evil')).toBe(false)
   })
 
+  it('페이지 읽기·쓰기 채널이 모두 등록되어 있다', () => {
+    expect(isWhitelistedChannel('pages:read')).toBe(true)
+    expect(isWhitelistedChannel('pages:write')).toBe(true)
+  })
+
+  it('에이전트 조회·선택 채널이 등록되어 있다', () => {
+    expect(isWhitelistedChannel('agent:run')).toBe(true)
+    expect(isWhitelistedChannel('agent:cancel')).toBe(true)
+    expect(isWhitelistedChannel('agent:list')).toBe(true)
+    expect(isWhitelistedChannel('agent:select')).toBe(true)
+  })
+
   it('assert는 위반 시 throw한다', () => {
     expect(() => assertWhitelistedChannel('app:versions')).not.toThrow()
     expect(() => assertWhitelistedChannel('system:panic')).toThrow(/허용되지 않은 IPC 채널/)

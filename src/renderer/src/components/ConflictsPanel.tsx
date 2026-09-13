@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { ko } from '../../../core/i18n/ko'
 import { useAppStore } from '../state/appStore'
+import { DiffView } from './DiffView'
 import { AlertIcon } from './icons'
 
 export function ConflictsPanel({ spaceKey }: { spaceKey: string }): React.ReactElement {
@@ -8,6 +9,7 @@ export function ConflictsPanel({ spaceKey }: { spaceKey: string }): React.ReactE
   const resolveConflict = useAppStore((s) => s.resolveConflict)
   const openDiff = useAppStore((s) => s.openDiff)
   const conflicts = useAppStore((s) => s.conflicts)
+  const diffs = useAppStore((s) => s.diffs)
   const busy = useAppStore((s) => s.busy)
   // 위험 동작(덮어쓰기)은 2단계 확인 — 확인 대상 pageId를 저장한다
   const [confirmingOverwrite, setConfirmingOverwrite] = useState<string | null>(null)
@@ -94,6 +96,15 @@ export function ConflictsPanel({ spaceKey }: { spaceKey: string }): React.ReactE
                             type="button"
                             className="btn btn--default"
                             disabled={busy}
+                            title={ko.conflict.keepBothHint}
+                            onClick={() => void resolveConflict(candidate, 'keep-both')}
+                          >
+                            {ko.conflict.keepBoth}
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn--default"
+                            disabled={busy}
                             onClick={() => void resolveConflict(candidate, 'take-remote')}
                           >
                             {ko.conflict.takeRemote}
@@ -112,6 +123,15 @@ export function ConflictsPanel({ spaceKey }: { spaceKey: string }): React.ReactE
                         </>
                       )}
                     </div>
+                    {/* 직접 처리 선택 시 로컬↔원격 차이를 카드 바로 아래에 보여준다 —
+                        예전에는 diff를 불러만 두고 화면 어디에도 렌더하지 않았다 */}
+                    {diffs[candidate.path] ? (
+                      <div className="conflict-card__diff">
+                        <p className="conflict-card__warning">{ko.conflict.manualMergeHint}</p>
+                        <span className="section-label">{ko.conflict.diffLabel}</span>
+                        <DiffView changes={diffs[candidate.path]!} />
+                      </div>
+                    ) : null}
                   </>
                 )}
               </li>

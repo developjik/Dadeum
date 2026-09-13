@@ -4,16 +4,19 @@ import { ChatPanel } from './components/ChatPanel'
 import { ConflictsPanel } from './components/ConflictsPanel'
 import { ConnectForm } from './components/ConnectForm'
 import { DocTree } from './components/DocTree'
+import { EditorPane } from './components/Editor'
 import {
   AlertIcon,
   BrandMark,
   CheckCircleIcon,
   CloseIcon,
   DocIcon,
+  SettingsIcon,
   SyncIcon,
 } from './components/icons'
 import { Preview } from './components/Preview'
 import { ReviewPanel } from './components/ReviewPanel'
+import { SettingsDialog } from './components/SettingsDialog'
 import { ensureAgentEventSubscription, useAppStore } from './state/appStore'
 
 type TabKey = 'document' | 'review' | 'conflict'
@@ -32,12 +35,14 @@ export function App(): React.ReactElement {
   const spaces = useAppStore((s) => s.spaces)
   const tree = useAppStore((s) => s.tree)
   const selected = useAppStore((s) => s.selected)
+  const editing = useAppStore((s) => s.editing)
   const error = useAppStore((s) => s.error)
   const busy = useAppStore((s) => s.busy)
   const syncingSpace = useAppStore((s) => s.syncingSpace)
   const syncingProgress = useAppStore((s) => s.syncingProgress)
   const cancelPull = useAppStore((s) => s.cancelPull)
   const activeSpaceKey = useAppStore((s) => s.activeSpaceKey)
+  const syncError = useAppStore((s) => s.syncError)
   const baseUrl = useAppStore((s) => s.baseUrl)
   const email = useAppStore((s) => s.email)
   const changeset = useAppStore((s) => s.changeset)
@@ -59,6 +64,7 @@ export function App(): React.ReactElement {
   const checkUpdate = useAppStore((s) => s.checkUpdate)
   const installUpdate = useAppStore((s) => s.installUpdate)
   const [tab, setTab] = useState<TabKey>('document')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   /** 활성 스페이스 행 — 스페이스 전환 시 목록이 스크롤돼 있어도 보이게 가져온다 */
   const activeSpaceRef = useRef<HTMLButtonElement | null>(null)
 
@@ -156,10 +162,24 @@ export function App(): React.ReactElement {
             </button>
           )}
           <span className="app-header__site">
-            <span className="status-dot" aria-hidden="true" />
+            <span
+              className={`status-dot${syncError ? ' status-dot--degraded' : ''}`}
+              aria-hidden="true"
+              title={syncError ? `${ko.sync.degraded} · ${syncError}` : undefined}
+            />
             <span className="app-header__site-host">{siteHost(baseUrl)}</span>
           </span>
           {email ? <span className="app-header__email">{email}</span> : null}
+          <button
+            type="button"
+            className="btn btn--icon btn--subtle"
+            title={ko.aria.settings}
+            aria-label={ko.aria.settings}
+            aria-haspopup="dialog"
+            onClick={() => setSettingsOpen(true)}
+          >
+            <SettingsIcon />
+          </button>
           <button
             type="button"
             className="btn btn--subtle"
@@ -335,7 +355,12 @@ export function App(): React.ReactElement {
                   hidden={tab !== 'document'}
                 >
                   {selected ? (
-                    <Preview page={selected} />
+                    // 편집 세션은 문서 경로에 귀속 — 같은 문서를 보고 있을 때만 에디터로 바꾼다
+                    editing && editing.path === selected.path ? (
+                      <EditorPane page={selected} />
+                    ) : (
+                      <Preview page={selected} />
+                    )
                   ) : (
                     <div className="empty-state">
                       <DocIcon size={28} />
@@ -375,6 +400,8 @@ export function App(): React.ReactElement {
           {activeSpaceKey ? <ChatPanel /> : null}
         </section>
       </div>
+
+      {settingsOpen ? <SettingsDialog onClose={() => setSettingsOpen(false)} /> : null}
     </div>
   )
 }

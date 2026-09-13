@@ -9,6 +9,7 @@
  *   electron-vite 기본 구조라 끄면 renderer가 ERR_FILE_NOT_FOUND로 실패한다(검증됨).
  */
 const { existsSync, readdirSync, rmSync } = require('node:fs')
+const { join } = require('node:path')
 const { Arch } = require('electron-builder')
 const { flipFuses, FuseVersion, FuseV1Options } = require('@electron/fuses')
 

@@ -16,6 +16,9 @@ export interface PageRecord {
   updatedAt: string | null
   syncedAt: string
   remoteDeleted: boolean
+  /** 마지막 동기화 시점의 정규화 마크다운 본문(3-way 병합의 공통 조상) */
+  baseBody: string | null
+  baseVersion: number | null
 }
 
 export interface AttachmentRecord {
@@ -47,7 +50,9 @@ export class SyncStateDb {
         content_hash TEXT,
         updated_at TEXT,
         synced_at TEXT NOT NULL,
-        remote_deleted INTEGER NOT NULL DEFAULT 0
+        remote_deleted INTEGER NOT NULL DEFAULT 0,
+        base_body TEXT,
+        base_version INTEGER
       );
       CREATE INDEX IF NOT EXISTS idx_pages_space ON pages(space_key);
 
@@ -66,6 +71,12 @@ export class SyncStateDb {
         updated_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS agent_settings (
+        space_key TEXT PRIMARY KEY,
+        adapter_name TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS pull_log (
         space_key TEXT PRIMARY KEY,
         started_at TEXT NOT NULL
@@ -73,7 +84,20 @@ export class SyncStateDb {
     `)
     // 스키마 버전 스탬프 — 향후 변경은 user_version 기반 순차 마이그레이션 단계를 추가한다
     // (v1은 전 테이블이 IF NOT EXISTS 멱등 생성이라 기존 워크스페이스와 호환).
-    this.db.pragma('user_version = 1')
+    // v2: agent_settings(스페이스별 에이전트 어댑터 선택) 추가 — 역시 멱등 생성.
+    // v3: pages에 base_body·base_version(마지막 동기화 기준본) 추가 — 신규 db는 생성에
+    // 포함되고 기존 db는 ALTER로 얻는다(순차 단계).
+    const version = this.db.pragma('user_version', { simple: true }) as number
+    if (version < 3) {
+      const columns = new Set(
+        (this.db.pragma('table_info(pages)') as Array<{ name: string }>).map((col) => col.name),
+      )
+      if (!columns.has('base_body')) this.db.exec('ALTER TABLE pages ADD COLUMN base_body TEXT')
+      if (!columns.has('base_version')) {
+        this.db.exec('ALTER TABLE pages ADD COLUMN base_version INTEGER')
+      }
+      this.db.pragma('user_version = 3')
+    }
   }
 
   /** 여러 쓰기를 하나의 트랜잭션으로 묶는다 — 대량 pull의 문장별 fsync 병목 감소. */
@@ -194,6 +218,13 @@ export class SyncStateDb {
       .run(contentHash, new Date().toISOString(), pageId)
   }
 
+  /** 마지막 동기화 시점의 기준본(base copy)을 기록한다 — pull·push 완료 시점에만 갱신. */
+  setBaseCopy(pageId: string, baseBody: string, baseVersion: number): void {
+    this.db
+      .prepare('UPDATE pages SET base_body = ?, base_version = ? WHERE page_id = ?')
+      .run(baseBody, baseVersion, pageId)
+  }
+
   upsertAttachment(attachment: Omit<AttachmentRecord, 'syncedAt'> & { syncedAt?: string }): void {
     this.db
       .prepare(
@@ -241,10 +272,33 @@ export class SyncStateDb {
   setAgentSessionId(spaceKey: string, agentSessionId: string): void {
     this.db
       .prepare(
-        `INSERT INTO chat_sessions (space_key, agent_session_id, updated_at) VALUES (?, ?, ?)
-         ON CONFLICT(space_key) DO UPDATE SET agent_session_id=@agent_session_id, updated_at=@updated_at`,
+        `INSERT INTO chat_sessions (space_key, agent_session_id, updated_at)
+         VALUES (@spaceKey, @agentSessionId, @updatedAt)
+         ON CONFLICT(space_key) DO UPDATE SET
+           agent_session_id=@agentSessionId, updated_at=@updatedAt`,
       )
-      .run(spaceKey, agentSessionId, new Date().toISOString())
+      .run({
+        spaceKey,
+        agentSessionId,
+        updatedAt: new Date().toISOString(),
+      })
+  }
+
+  /** 스페이스가 사용할 에이전트 어댑터 이름(미섀장 시 null = 기본 어댑터). */
+  getAgentAdapterName(spaceKey: string): string | null {
+    const row = this.db
+      .prepare('SELECT adapter_name FROM agent_settings WHERE space_key = ?')
+      .get(spaceKey) as { adapter_name?: string } | undefined
+    return row?.adapter_name ?? null
+  }
+
+  setAgentAdapterName(spaceKey: string, adapterName: string): void {
+    this.db
+      .prepare(
+        `INSERT INTO agent_settings (space_key, adapter_name, updated_at) VALUES (?, ?, ?)
+         ON CONFLICT(space_key) DO UPDATE SET adapter_name=excluded.adapter_name, updated_at=excluded.updated_at`,
+      )
+      .run(spaceKey, adapterName, new Date().toISOString())
   }
 
   private toPage(row: {
@@ -258,6 +312,8 @@ export class SyncStateDb {
     updated_at: string | null
     synced_at: string
     remote_deleted: number
+    base_body: string | null
+    base_version: number | null
   }): PageRecord {
     return {
       pageId: row.page_id,
@@ -270,6 +326,8 @@ export class SyncStateDb {
       updatedAt: row.updated_at,
       syncedAt: row.synced_at,
       remoteDeleted: row.remote_deleted === 1,
+      baseBody: row.base_body,
+      baseVersion: row.base_version,
     }
   }
 }

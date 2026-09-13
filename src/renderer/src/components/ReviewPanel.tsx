@@ -1,8 +1,8 @@
 import { useState } from 'react'
 import { ko } from '../../../core/i18n/ko'
 import type { ModifiedPage } from '../../../core/push/changeSet'
-import type { LineChange } from '../../../core/push/diff'
 import { useAppStore } from '../state/appStore'
+import { DiffView } from './DiffView'
 import { AlertIcon, CheckCircleIcon, DiffIcon } from './icons'
 
 function CheckItem({
@@ -122,6 +122,12 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
       : [],
   )
   const validSelected = new Set([...selected].filter((path) => changesetPaths.has(path)))
+
+  // 감사 게이트: '승인 보류 권고(error)' 판정을 받은 파일이 승인 선택에 포함되면
+  // 확인 단계의 문구를 위험 변형으로 바꾸고 대상 파일을 나열해 반드시 눈에 띄게 한다.
+  const errorVerdictFiles = (reviewVerdict?.files ?? []).filter(
+    (file) => file.status === 'error' && validSelected.has(file.path),
+  )
 
   // 전체 선택/해제 — 현재 변경 세트의 선택 가능한 모든 경로
   const allPaths = changeset
@@ -364,8 +370,15 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
             {confirming ? (
               <fieldset className="review-actions__confirm" aria-label={ko.aria.confirmUpload}>
                 <span className="review-actions__confirm-text">
-                  {ko.review.confirmUpload(validSelected.size)}
+                  {errorVerdictFiles.length > 0
+                    ? ko.review.confirmUploadWithErrors(errorVerdictFiles.length)
+                    : ko.review.confirmUpload(validSelected.size)}
                 </span>
+                {errorVerdictFiles.length > 0 ? (
+                  <span className="review-actions__confirm-errors" role="alert">
+                    {errorVerdictFiles.map((file) => file.path).join(', ')}
+                  </span>
+                ) : null}
                 <button
                   type="button"
                   className="btn btn--danger"
@@ -454,24 +467,5 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
         </div>
       ) : null}
     </section>
-  )
-}
-
-function DiffView({ changes }: { changes: LineChange[] }): React.ReactElement {
-  return (
-    <pre className="diff-view">
-      {changes.flatMap((change, changeIndex) =>
-        change.value
-          .split('\n')
-          .filter((line: string) => line.length > 0)
-          .map((line, index) => (
-            // biome-ignore lint/suspicious/noArrayIndexKey: diff 줄에는 안정적 식별자가 없고 changeIndex 조합으로 형제 간 키 충돌을 막는다
-            <div key={`${changeIndex}-${index}`} className={`diff-line diff-line--${change.type}`}>
-              {change.type === 'added' ? '+ ' : change.type === 'removed' ? '- ' : '  '}
-              {line}
-            </div>
-          )),
-      )}
-    </pre>
   )
 }

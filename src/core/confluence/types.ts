@@ -21,6 +21,7 @@ export type ConfluenceErrorKind =
   | 'unauthorized' // 401 — 이메일/토큰 오류
   | 'forbidden' // 403
   | 'not_found' // 404 — 원격 삭제됨
+  | 'conflict' // 409 — 사전 검사와 PUT 사이 원격 변경(TOCTOU 창)
   | 'rate_limited' // 429
   | 'network' // 연결 실패/DNS
   | 'server' // 5xx

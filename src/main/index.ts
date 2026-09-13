@@ -3,6 +3,7 @@ import { app, BrowserWindow, session } from 'electron'
 import { buildCsp } from '../core/security/csp'
 import { isAllowedNavigation } from '../core/security/navigation'
 import { chatRuns, registerAuthAndSpaceHandlers } from './authHandlers'
+import { initDiagnostics } from './diagnostics'
 import { registerIpcHandlers } from './ipc'
 import { registerUpdaterHandlers } from './updater'
 import { createMainWindow } from './window'
@@ -10,6 +11,17 @@ import { createMainWindow } from './window'
 const isDev = !!process.env.ELECTRON_RENDERER_URL
 // 빌드 산출물 기준 경로 확인용(디버그/스모크).
 const rendererDir = join(__dirname, '../renderer')
+
+// 개발 실행(dev Electron 바이너리)과 패키징 빌드가 같은 userData를 공유하면
+// safeStorage 키체인 토큰이 서명 차이로 풀리지 않아 매번 재로그인하게 된다 —
+// 개발 데이터는 '-dev' 폴더로 분리한다(자격증명·진단 로그·싱글턴 락 모두 분리).
+if (!app.isPackaged) {
+  app.setPath('userData', `${app.getPath('userData')}-dev`)
+}
+
+// 진단(로컬 크래시 덤프 + 미처리 예외 로그)은 가능한 한 일찍 —
+// crashReporter.start는 app ready 전 호출이 요구된다.
+initDiagnostics()
 
 // 새 창(window.open) 전면 차단 — 모든 외부 링크는 OS 브라우저로만 연다.
 app.on('web-contents-created', (_event, contents) => {

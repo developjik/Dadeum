@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { ConfluenceClient } from '../../core/confluence/client'
 import { fileHashOf } from '../../core/store/hash'
+import { pageContentHashOf } from '../../core/store/pageFingerprint'
 import { SyncStateDb } from '../../core/store/syncState'
 import { pushApprovedPages } from '../push/pushService'
 import { resolveConflict } from './conflictService'
@@ -124,6 +125,9 @@ describe('R-2 회귀 테스트', () => {
       capturedAt: new Date().toISOString(),
       entries: new Map([[relPath, { hash: fileHashOf(readFileSync(join(root, relPath))) }]]),
     }
+    // 실제 서버처럼: PUT이 저장한 내용·버전을 이후 GET(반영 검증)이 되돌려본다
+    let storedStorage = '<p>서버</p>'
+    let storedVersion = 2
     const client = new ConfluenceClient({
       baseUrl: 'https://acme.atlassian.net',
       email: 'dev@acme.io',
@@ -137,14 +141,19 @@ describe('R-2 회귀 테스트', () => {
             JSON.stringify({
               id: '1001',
               title: '가이드',
-              version: { number: 2 },
-              body: { storage: { value: '<p>서버</p>' } },
+              version: { number: storedVersion },
+              body: { storage: { value: storedStorage } },
             }),
             { status: 200, headers: { 'Content-Type': 'application/json' } },
           )
         }
         if (url.includes('/api/v2/pages/1001') && method === 'PUT') {
-          const requested = JSON.parse(String(init?.body)) as { version: { number: number } }
+          const requested = JSON.parse(String(init?.body)) as {
+            version: { number: number }
+            body: { value: string }
+          }
+          storedVersion = requested.version.number
+          storedStorage = requested.body.value
           return new Response(
             JSON.stringify({
               id: '1001',
@@ -171,7 +180,10 @@ describe('R-2 회귀 테스트', () => {
     expect(outcome.uploaded).toHaveLength(1)
     const page = db.getPage('1001')
     expect(page?.version).toBe(3)
-    expect(page?.contentHash).toBe(fileHashOf(readFileSync(join(root, relPath))))
+    expect(page?.contentHash).toBe(pageContentHashOf(readFileSync(join(root, relPath), 'utf8')))
     expect(db.getPage('1001')?.contentHash).not.toBe('old-hash')
+    // push 완료 시점의 기준본(base copy)이 기록된다
+    expect(page?.baseVersion).toBe(3)
+    expect(page?.baseBody).toContain('수정 본문')
   })
 })

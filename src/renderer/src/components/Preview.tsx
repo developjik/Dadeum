@@ -1,17 +1,29 @@
 import { ko } from '../../../core/i18n/ko'
 import type { SelectedPage } from '../state/appStore'
 import { useAppStore } from '../state/appStore'
-import { ExternalIcon } from './icons'
+import { EditIcon, ExternalIcon } from './icons'
 
 export function Preview({ page }: { page: SelectedPage }): React.ReactElement {
   const openExternal = useAppStore((s) => s.openExternal)
   const pageLoading = useAppStore((s) => s.pageLoading)
+  const beginEdit = useAppStore((s) => s.beginEdit)
+  const editLoading = useAppStore((s) => s.editLoading)
   return (
     <section className="preview-pane" aria-label={ko.aria.pagePreview}>
       <header className="preview-pane__header">
         {pageLoading ? <span className="spinner" aria-hidden="true" /> : null}
         <h1 className="preview-pane__title">{page.title}</h1>
         <span className="badge badge--neutral">v{page.version}</span>
+        <button
+          type="button"
+          className="btn btn--primary"
+          disabled={editLoading}
+          title={ko.editor.edit}
+          onClick={() => void beginEdit(page.path)}
+        >
+          {editLoading ? <span className="spinner" aria-hidden="true" /> : <EditIcon />}
+          {ko.editor.edit}
+        </button>
         <button
           type="button"
           className="btn btn--default"
