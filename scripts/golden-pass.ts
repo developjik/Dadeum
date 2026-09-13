@@ -25,6 +25,17 @@ if (!baseUrl || !email || !apiToken) {
   process.exit(2)
 }
 
+// SSRF 방지: 앱 본체(normalizeBaseUrl)와 동일하게 Cloud 호스트 형식만 허용한다.
+// 이 스크립트는 환경변수 URL로 직접 fetch하므로 임의/내부 호스트 지정을 원천 차단한다.
+const parsedBaseUrl = new URL(baseUrl)
+if (
+  parsedBaseUrl.protocol !== 'https:' ||
+  !/^[a-z0-9.-]+\.atlassian\.net$/i.test(parsedBaseUrl.hostname)
+) {
+  console.error('CONFLUENCE_BASE_URL은 https://xxx.atlassian.net 형식이어야 합니다')
+  process.exit(2)
+}
+
 const workspaceRoot = join(process.cwd(), 'golden-pass-workspace')
 // 매 실행마다 프리스틱한 워크스페이스 사용(스크래치 전용 디렉터리)
 rmSync(workspaceRoot, { recursive: true, force: true })
@@ -36,7 +47,8 @@ const TEST_TITLE = 'Confluence Local Golden Pass Test'
 
 async function main(): Promise<void> {
   // 0. 인증 계정의 개인 스페이스를 샌드박스로 사용(공용 콘텐츠 무영향)
-  const meResponse = await fetch(`${baseUrl}/wiki/rest/api/user/current`, {
+  // fetch 대상은 클라이언트 생성자가 검증·정규화한 URL(identity.baseUrl)이다.
+  const meResponse = await fetch(`${client.identity.baseUrl}/wiki/rest/api/user/current`, {
     headers: { Authorization: `Basic ${Buffer.from(`${email}:${apiToken}`).toString('base64')}` },
   })
   if (!meResponse.ok)
