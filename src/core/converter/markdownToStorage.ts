@@ -116,18 +116,20 @@ function convertList(node: List, ctx: CarrierRegistry): string {
   const tag = node.ordered ? 'ol' : 'ul'
   const items = node.children
     .map((item) => {
-      const direct: string[] = []
+      const direct: RootContent[] = []
       const nested: string[] = []
       for (const child of item.children) {
         if (child.type === 'list') nested.push(convertList(child, ctx))
-        else direct.push(convertRootContent(child, ctx))
+        else direct.push(child)
       }
-      const inner =
-        direct
-          .join('')
-          .replace(/^<p>/, '')
-          .replace(/<\/p>$/, '') + nested.join('')
-      return `<li>${inner}</li>`
+      // loose 목록(문단 2개 이상·중첩 블록)은 <p>를 유지한다 —
+      // 무조건 unwrap하면 <li>a</p><p>b</li> 같은 불법 XML이 만들어진다.
+      const [single] = direct
+      const directXml =
+        direct.length === 1 && single?.type === 'paragraph'
+          ? convertPhrasing(single.children, ctx)
+          : direct.map((child) => convertRootContent(child, ctx)).join('')
+      return `<li>${directXml}${nested.join('')}</li>`
     })
     .join('')
   return `<${tag}>${items}</${tag}>`

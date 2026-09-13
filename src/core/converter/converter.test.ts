@@ -60,6 +60,14 @@ describe('storageToMarkdown', () => {
     expect(markdown).toContain('<!-- confluence:carriers -->')
     expect(markdown).toContain('<ac:link>')
   })
+  it('CDATA 내부의 named entity를 치환하지 않는다(코드 매크로 보존)', () => {
+    const cdata = '<![CDATA[a&nbsp;b &copy; 2026]]>'
+    const macro = `<ac:structured-macro ac:name="code"><ac:plain-text-body>${cdata}</ac:plain-text-body></ac:structured-macro>`
+    const { markdown } = storageToMarkdown(`<p>앞</p>${macro}<p>뒤</p>`)
+    expect(markdown).toContain('a&nbsp;b &copy; 2026')
+    expect(markdown).not.toContain('&#160;')
+    expect(markdownToStorage(markdown)).toContain(cdata)
+  })
 })
 
 describe('markdownToStorage', () => {
@@ -83,6 +91,15 @@ describe('markdownToStorage', () => {
       `\`\`\`confluence-storage name=structured-macro id=deadbeef\n${macro}\n\`\`\``,
     )
     expect(storage).toContain('<ac:parameter ac:name="colour">Green</ac:parameter>')
+  })
+  it('loose 목록 항목(문단 2개)이 불법 XML을 만들지 않는다', () => {
+    expect(markdownToStorage('- 첫 문단\n\n  둘째 문단')).toBe(
+      '<ul><li><p>첫 문단</p><p>둘째 문단</p></li></ul>',
+    )
+  })
+
+  it('tight 목록 항목은 여전히 문단을 벗긴다', () => {
+    expect(markdownToStorage('- 항목')).toBe('<ul><li>항목</li></ul>')
   })
 })
 

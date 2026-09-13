@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto'
 import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import type { PageRecord, SyncStateDb } from '../store/syncState'
-import { dirSafeSpaceKey, isSyncTarget, parsePageFile } from '../store/workspace'
+import { isSyncTarget, parsePageFile, safeSpaceDirName } from '../store/workspace'
 
 /**
  * 변경 세트 산출(계획 §8.3-1): allowlist 파일을 스캔해 db 해시와 비교한다.
@@ -45,7 +45,7 @@ export function computeChangeSet(
   db: SyncStateDb,
   spaceKey: string,
 ): ChangeSet {
-  const spaceRoot = join(workspaceRoot, 'spaces', dirSafeSpaceKey(spaceKey))
+  const spaceRoot = join(workspaceRoot, 'spaces', safeSpaceDirName(spaceKey))
   const indexFiles = walkIndexFiles(spaceRoot, workspaceRoot)
 
   const seenDirs = new Set<string>()

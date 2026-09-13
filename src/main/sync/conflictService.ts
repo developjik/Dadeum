@@ -5,7 +5,12 @@ import { markdownToStorage } from '../../core/converter/markdownToStorage'
 import { storageToMarkdown } from '../../core/converter/storageToMarkdown'
 import { fileHashOf } from '../../core/store/hash'
 import type { SyncStateDb } from '../../core/store/syncState'
-import { parsePageFile, renderPageFile } from '../../core/store/workspace'
+import {
+  assertSyncPagePath,
+  isWithinRoot,
+  parsePageFile,
+  renderPageFile,
+} from '../../core/store/workspace'
 import { machineFor } from './machines'
 
 export type ConflictChoice = 'overwrite' | 'take-remote' | 'manual'
@@ -27,9 +32,13 @@ export async function resolveConflict(options: {
   const { choice, path, pageId, client, workspaceRoot, db } = options
   // B-2R: 머신 키는 db의 원본 spaceKey(개인 스페이스는 디렉터리명이 personal-*로 달라짐)
   const record = db.getPage(pageId)
-  const spaceKey = record?.spaceKey ?? spaceKeyFromPath(path)
+  const safePath = assertSyncPagePath(path)
+  const spaceKey = record?.spaceKey ?? spaceKeyFromPath(safePath)
   const machine = machineFor(spaceKey)
-  const absPath = join(workspaceRoot, path)
+  const absPath = join(workspaceRoot, safePath)
+  if (!isWithinRoot(workspaceRoot, absPath)) {
+    throw new Error(`동기 대상이 아닌 경로입니다: ${safePath}`)
+  }
 
   if (choice === 'overwrite') {
     const started = machine.apply('startPush')
@@ -56,7 +65,7 @@ export async function resolveConflict(options: {
       db.upsertPage({
         pageId,
         spaceKey: meta.spaceKey,
-        path,
+        path: safePath,
         title: meta.title,
         version: updated.version,
         parentId: meta.parentId,
@@ -80,7 +89,7 @@ export async function resolveConflict(options: {
         '.sync',
         'trash',
         ts,
-        path.replace(/\/index\.md$/, '.local-backup.md'),
+        safePath.replace(/\/index\.md$/, '.local-backup.md'),
       )
       mkdirSync(dirname(backupPath), { recursive: true })
       writeFileSync(backupPath, readFileSync(absPath)) // 로컬 변경 1회 백업(trash는 allowlist 밖)

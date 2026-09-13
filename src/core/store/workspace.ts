@@ -2,6 +2,7 @@
  * 워크스페이스 폴더 규약(계획 §7).
  * 레이아웃·슬러그·동기 대상 allowlist·frontmatter 코덱의 단일 소스.
  */
+import { sep } from 'node:path'
 export interface WorkspaceLayout {
   root: string
   settingsFile: string // confluence.yaml
@@ -34,6 +35,24 @@ export function spaceDir(layout: WorkspaceLayout, spaceKey: string): string {
  */
 export function dirSafeSpaceKey(spaceKey: string): string {
   return spaceKey.replace(/^~/, 'personal-')
+}
+
+/**
+ * renderer 입력 spaceKey → 스페이스 디렉터리명(경로 조작 게이트 — SEC-001).
+ * 디렉터리명 하나로 쓰이므로 경로 구분자·`..`·`.`·빈 키는 거절한다.
+ * 원격 열거로 이미 검증된 키가 아니면 반드시 이 함수를 거친다.
+ */
+export function safeSpaceDirName(spaceKey: string): string {
+  if (
+    spaceKey.length === 0 ||
+    spaceKey === '.' ||
+    spaceKey.includes('/') ||
+    spaceKey.includes('\\') ||
+    spaceKey.includes('..')
+  ) {
+    throw new Error(`잘못된 스페이스 키입니다: ${spaceKey}`)
+  }
+  return dirSafeSpaceKey(spaceKey)
 }
 
 /**
@@ -112,6 +131,23 @@ export function isSyncTarget(relativePath: string): boolean {
   const attachmentsIndex = segments.indexOf('attachments')
   if (attachmentsIndex === segments.length - 2 && attachmentsIndex >= 2) return true
   return false
+}
+
+/**
+ * 페이지 파일 상대경로 공용 게이트(SEC-002): 정규화 후 allowlist·index.md 끝을 강제한다.
+ * pages:read·conflict:resolve 등 renderer가 전달하는 경로는 반드시 통과해야 한다.
+ */
+export function assertSyncPagePath(relativePath: string): string {
+  const normalized = relativePath.replace(/\\/g, '/')
+  if (!isSyncTarget(normalized) || !normalized.endsWith('index.md')) {
+    throw new Error(`동기 대상이 아닌 경로입니다: ${normalized}`)
+  }
+  return normalized
+}
+
+/** 절대경로가 루트 내부인지 판정(구분자 포함 prefix — `/rootX` 접두사 오탐 방지). */
+export function isWithinRoot(root: string, absPath: string): boolean {
+  return absPath === root || absPath.startsWith(`${root}${sep}`)
 }
 
 // ── frontmatter 코덱(플랫 스키마 한정: pageId/spaceKey/title/version/parentId/url/updatedAt/syncedAt) ──

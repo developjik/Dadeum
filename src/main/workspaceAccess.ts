@@ -3,7 +3,12 @@ import { join } from 'node:path'
 import { app } from 'electron'
 import { type PageRecord, SyncStateDb } from '../core/store/syncState'
 import { buildPageTree, type PageTreeNode } from '../core/store/tree'
-import { isSyncTarget, parsePageFile, workspaceLayout } from '../core/store/workspace'
+import {
+  assertSyncPagePath,
+  isWithinRoot,
+  parsePageFile,
+  workspaceLayout,
+} from '../core/store/workspace'
 
 /**
  * 워크스페이스 접근 게이트(계획 §6-7).
@@ -57,12 +62,9 @@ export interface ReadPageResult {
 /** 페이지 파일 읽기 — 경로 탈출·비대상 파일 차단 후 원문과 메타를 반환한다. */
 export function readPageFileGuarded(relativePath: string): ReadPageResult {
   const root = resolveWorkspaceRoot()
-  const normalized = relativePath.replace(/\\/g, '/')
-  if (!isSyncTarget(normalized) || !normalized.endsWith('index.md')) {
-    throw new Error(`동기 대상이 아닌 경로입니다: ${normalized}`)
-  }
+  const normalized = assertSyncPagePath(relativePath)
   const absPath = join(root, normalized)
-  if (!absPath.startsWith(root) || !existsSync(absPath)) {
+  if (!isWithinRoot(root, absPath) || !existsSync(absPath)) {
     throw new Error(`페이지 파일을 찾을 수 없습니다: ${normalized}`)
   }
   const { meta, body } = parsePageFile(readFileSync(absPath, 'utf8'))

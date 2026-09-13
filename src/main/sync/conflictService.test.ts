@@ -116,4 +116,26 @@ describe('resolveConflict(ef-8 3지 선택)', () => {
     expect(existsSync(result.remoteFile!)).toBe(true)
     expect(readFileSync(result.remoteFile!, 'utf8')).toContain('서버의 최신 본문')
   })
+  it('경로 탈출 시도는 게이트에서 거부된다(워크스페이스 밖 쓰기 차단 — SEC-002)', async () => {
+    const { root, db } = setup()
+    const client = makeClient()
+    for (const malicious of [
+      '../outside.md',
+      'spaces/../../escape/index.md',
+      '/tmp/evil/index.md',
+    ]) {
+      await expect(
+        resolveConflict({
+          choice: 'manual',
+          path: malicious,
+          pageId: '1001',
+          client,
+          workspaceRoot: root,
+          db,
+        }),
+      ).rejects.toThrow('동기 대상이 아닌 경로')
+    }
+    expect(existsSync(join(root, '../outside.md'))).toBe(false)
+    expect(existsSync(join(root, 'escape'))).toBe(false)
+  })
 })

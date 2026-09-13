@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest'
 import {
+  assertSyncPagePath,
   isSyncTarget,
   pageSlug,
   parsePageFile,
   renderPageFile,
+  safeSpaceDirName,
   slugify,
   spaceDir,
   workspaceLayout,
@@ -74,6 +76,36 @@ describe('isSyncTarget allowlist(F3/F-12)', () => {
     expect(isSyncTarget('..\\..\\etc\\passwd')).toBe(false)
     expect(isSyncTarget('index.md')).toBe(false)
     expect(isSyncTarget('attachments/evil.md')).toBe(false)
+  })
+})
+
+describe('safeSpaceDirName(경로 조작 게이트 — SEC-001)', () => {
+  it('정상 키는 통과하고 개인 스페이스 치환을 유지한다', () => {
+    expect(safeSpaceDirName('DEV')).toBe('DEV')
+    expect(safeSpaceDirName('~abc123')).toBe('personal-abc123')
+  })
+
+  it('구분자·상위 경로·빈 키를 거절한다', () => {
+    for (const bad of ['', '.', '..', 'a/b', 'a\\b', 'a/../b', '/abs']) {
+      expect(() => safeSpaceDirName(bad)).toThrow('잘못된 스페이스 키')
+    }
+  })
+})
+
+describe('assertSyncPagePath(공용 페이지 경로 게이트 — SEC-002)', () => {
+  it('역슬래시를 정규화한 뒤 페이지 경로만 통과시킨다', () => {
+    expect(assertSyncPagePath('spaces/DEV/가이드\\index.md')).toBe('spaces/DEV/가이드/index.md')
+  })
+
+  it('탈출·비페이지 경로는 거절한다', () => {
+    for (const bad of [
+      '../outside.md',
+      'spaces/../../escape/index.md',
+      '/tmp/evil/index.md',
+      'spaces/DEV/x/attachments/a.png',
+    ]) {
+      expect(() => assertSyncPagePath(bad)).toThrow('동기 대상이 아닌 경로')
+    }
   })
 })
 

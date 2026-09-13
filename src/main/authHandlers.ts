@@ -6,7 +6,7 @@ import { captureSnapshot, verifySnapshot } from '../core/push/approval'
 import { computeChangeSet } from '../core/push/changeSet'
 import { markdownLineDiff } from '../core/push/diff'
 import { fileHashOf } from '../core/store/hash'
-import { dirSafeSpaceKey } from '../core/store/workspace'
+import { safeSpaceDirName } from '../core/store/workspace'
 import { ChatRunService } from './agent/chatService'
 import { ClaudeCodeAdapter } from './agent/claudeCodeAdapter'
 import {
@@ -107,7 +107,7 @@ export function registerAuthAndSpaceHandlers(): void {
     if (!spaceKey || !prompt) throw new Error('spaceKey와 prompt가 필요합니다')
     const client = requireClient()
     void client
-    const spaceRoot = join(resolveWorkspaceRoot(), 'spaces', dirSafeSpaceKey(spaceKey))
+    const spaceRoot = join(resolveWorkspaceRoot(), 'spaces', safeSpaceDirName(spaceKey))
     return chatRuns.startRun({
       sender,
       adapterName: 'claude-code',

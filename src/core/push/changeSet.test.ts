@@ -62,6 +62,12 @@ describe('computeChangeSet', () => {
     const changes = computeChangeSet(root, db, 'DEV')
     expect(changes.missing.map((page) => page.pageId)).toContain('2002')
   })
+  it('경로 조작 spaceKey를 거부한다(SEC-001)', () => {
+    const { root, db } = setupWorkspace()
+    for (const bad of ['../outside', 'a/b', '..']) {
+      expect(() => computeChangeSet(root, db, bad)).toThrow('잘못된 스페이스 키')
+    }
+  })
 })
 
 describe('승인 스냅샷(TOCTOU 차단, F-2)', () => {

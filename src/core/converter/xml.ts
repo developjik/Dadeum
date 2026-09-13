@@ -80,7 +80,15 @@ const NAMED_ENTITIES: Record<string, number> = {
 }
 
 function resolveNamedEntities(xml: string): string {
-  return xml.replace(/&([a-zA-Z][a-zA-Z0-9]+);/g, (match, name: string) => {
+  // CDATA 내부는 리터럴 텍스트(코드 매크로 본문 등)이므로 엔티티로 해석하지 않는다.
+  return xml
+    .split(/(<!\[CDATA\[[\s\S]*?\]\]>)/g)
+    .map((segment) => (segment.startsWith('<![CDATA[') ? segment : replaceNamedEntities(segment)))
+    .join('')
+}
+
+function replaceNamedEntities(segment: string): string {
+  return segment.replace(/&([a-zA-Z][a-zA-Z0-9]+);/g, (match, name: string) => {
     if (name === 'amp' || name === 'lt' || name === 'gt' || name === 'quot' || name === 'apos')
       return match
     const code = NAMED_ENTITIES[name]
