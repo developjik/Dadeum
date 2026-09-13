@@ -246,6 +246,12 @@ export function ensureAgentEventSubscription(): void {
             .then(() => {
               maybeAutoReview(payload.spaceKey, event.state)
             })
+            .catch((cause: unknown) => {
+              // 자동 감사 팝업 경로에서라도 미처리 거부로 렌더러가 죽지 않게 한다
+              useAppStore.setState({
+                error: cause instanceof Error ? cause.message : String(cause),
+              })
+            })
         }
       } else if ('type' in event && event.type === 'error' && isActiveSpace) {
         appendSystemMessage(`${ko.chat.errorPrefix} ${event.message}`)

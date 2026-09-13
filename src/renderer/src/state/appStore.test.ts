@@ -69,6 +69,11 @@ describe('에이전트 terminal 이벤트 스페이스 격리', () => {
   })
 
   it('활성 스페이스의 런 종료는 안내 문구와 changeset 재검사를 수행한다', () => {
+    invoke.mockImplementation(async (channel: string) => {
+      if (channel === 'push:changeset')
+        return { modified: [], added: [], missing: [], attachments: [] }
+      return {}
+    })
     useAppStore.setState({ activeSpaceKey: 'B', agentRunning: true, activeRunId: 'r2' })
     agentEmit?.({ runId: 'r2', spaceKey: 'B', event: { type: 'terminal', state: 'completed' } })
 
