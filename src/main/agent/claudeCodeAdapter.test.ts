@@ -214,6 +214,9 @@ describe('ClaudeCodeAdapter 계약', () => {
     // 1단계 정상 종료: CLI가 진행 중 편집을 안전하게 마무리할 기회
     expectGracefulKill(spawn)
     vi.advanceTimersByTime(2000)
+    // win32 kill-tree는 taskkill 스폰이라 fake 자식이 스스로 닫히지 않는다 —
+    // 실제 taskkill 종료에 따른 close 이벤트를 시뮬레이션한다
+    if (process.platform === 'win32') spawn.proc.emitClose(null)
     await promise
     // 2단계 강제 종료까지 정확히 2회 — win32는 taskkill 스폰 2회, POSIX는 SIGTERM→SIGKILL
     if (process.platform === 'win32') {
