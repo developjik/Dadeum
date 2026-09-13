@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ko } from '../../core/i18n/ko'
 import { ChatPanel } from './components/ChatPanel'
 import { ConflictsPanel } from './components/ConflictsPanel'
@@ -48,6 +48,7 @@ export function App(): React.ReactElement {
   const selectSpace = useAppStore((s) => s.selectSpace)
   const disconnect = useAppStore((s) => s.disconnect)
   const dismissError = useAppStore((s) => s.dismissError)
+  const dismissNotice = useAppStore((s) => s.dismissNotice)
   const notice = useAppStore((s) => s.notice)
   const loadChangeset = useAppStore((s) => s.loadChangeset)
   const loadConflicts = useAppStore((s) => s.loadConflicts)
@@ -58,6 +59,12 @@ export function App(): React.ReactElement {
   const checkUpdate = useAppStore((s) => s.checkUpdate)
   const installUpdate = useAppStore((s) => s.installUpdate)
   const [tab, setTab] = useState<TabKey>('document')
+  /** 활성 스페이스 행 — 스페이스 전환 시 목록이 스크롤돼 있어도 보이게 가져온다 */
+  const activeSpaceRef = useRef<HTMLButtonElement | null>(null)
+
+  useEffect(() => {
+    if (activeSpaceKey) activeSpaceRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [activeSpaceKey])
 
   useEffect(() => {
     ensureAgentEventSubscription()
@@ -96,8 +103,10 @@ export function App(): React.ReactElement {
   const conflictCount = conflicts.length
 
   /** 탭 진입 시 해당 패널 데이터를 새로 불러온다(기존 버튼 동작 승계). */
-  const activateTab = (next: TabKey): void => {
+  const activateTab = (next: TabKey, focus = false): void => {
     setTab(next)
+    // 키보드 전환은 활성 탭으로 포커스를 옮긴다(포커스=활성 일치)
+    if (focus) document.getElementById(`tab-${next}`)?.focus()
     if (!activeSpaceKey) return
     if (next === 'review') void loadChangeset(activeSpaceKey)
     if (next === 'conflict') void loadConflicts(activeSpaceKey)
@@ -165,7 +174,10 @@ export function App(): React.ReactElement {
       {error ? (
         <div className="error-banner" role="alert">
           <AlertIcon size={14} />
-          <span className="error-banner__text">{error}</span>
+          {/* 잘린 에러 전문은 툴팁으로 확인할 수 있다 */}
+          <span className="error-banner__text" title={error}>
+            {error}
+          </span>
           <button type="button" className="btn btn--subtle" onClick={dismissError}>
             <CloseIcon size={12} />
             {ko.common.close}
@@ -177,6 +189,10 @@ export function App(): React.ReactElement {
         <div className="notice-banner" role="status">
           <CheckCircleIcon size={14} />
           <span className="notice-banner__text">{notice}</span>
+          <button type="button" className="btn btn--subtle" onClick={dismissNotice}>
+            <CloseIcon size={12} />
+            {ko.common.close}
+          </button>
         </div>
       ) : null}
 
@@ -192,7 +208,9 @@ export function App(): React.ReactElement {
                   <li key={space.key} className="space-item">
                     <button
                       type="button"
+                      ref={active ? activeSpaceRef : undefined}
                       className={`space-row${active ? ' space-row--active' : ''}`}
+                      title={space.name}
                       onClick={() => void selectSpace(space.key)}
                     >
                       <span className="space-row__name">{space.name}</span>
@@ -236,7 +254,12 @@ export function App(): React.ReactElement {
             <DocTree
               tree={tree}
               selectedPath={selected?.path}
-              onOpen={(path) => void openPage(path)}
+              onOpen={(path) => {
+                // 검토·충돌 탭에서 문서를 골랐을 때 미리보기가 가려져
+                // 클릭이 무시된 것처럼 보이는 문제 — 문서 탭으로 전환한다.
+                setTab('document')
+                void openPage(path)
+              }}
             />
           </section>
         </aside>
@@ -249,16 +272,26 @@ export function App(): React.ReactElement {
                 aria-label={ko.aria.workspaceTabs}
                 role="tablist"
                 onKeyDown={(event) => {
-                  if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+                  // Arrow/Home/End 키로 탭 전환(활성화가 포커스를 따라간다)
                   const order: TabKey[] = ['document', 'review', 'conflict']
-                  const step = event.key === 'ArrowRight' ? 1 : order.length - 1
-                  activateTab(order[(order.indexOf(tab) + step) % order.length])
+                  const current = order.indexOf(tab)
+                  let next: number | null = null
+                  if (event.key === 'ArrowRight') next = (current + 1) % order.length
+                  else if (event.key === 'ArrowLeft')
+                    next = (current + order.length - 1) % order.length
+                  else if (event.key === 'Home') next = 0
+                  else if (event.key === 'End') next = order.length - 1
+                  if (next === null) return
+                  event.preventDefault()
+                  activateTab(order[next]!, true)
                 }}
               >
                 <button
                   type="button"
                   role="tab"
+                  id="tab-document"
                   aria-selected={tab === 'document'}
+                  aria-controls="panel-document"
                   className={`tab${tab === 'document' ? ' tab--active' : ''}`}
                   onClick={() => setTab('document')}
                 >
@@ -267,7 +300,9 @@ export function App(): React.ReactElement {
                 <button
                   type="button"
                   role="tab"
+                  id="tab-review"
                   aria-selected={tab === 'review'}
+                  aria-controls="panel-review"
                   className={`tab${tab === 'review' ? ' tab--active' : ''}`}
                   onClick={() => activateTab('review')}
                 >
@@ -277,7 +312,9 @@ export function App(): React.ReactElement {
                 <button
                   type="button"
                   role="tab"
+                  id="tab-conflict"
                   aria-selected={tab === 'conflict'}
+                  aria-controls="panel-conflict"
                   className={`tab${tab === 'conflict' ? ' tab--active' : ''}`}
                   onClick={() => activateTab('conflict')}
                 >
@@ -286,18 +323,44 @@ export function App(): React.ReactElement {
                 </button>
               </div>
               <div className="tab-panel">
-                {tab === 'document' ? (
-                  selected ? (
+                {/*
+                  패널은 숨김으로 계속 마운트한다 — 탭을 왕복해도 검토 선택·펼친 diff·
+                  스크롤 위치가 유지된다. key로 스페이스 전환 시에만 상태를 초기화한다.
+                */}
+                <div
+                  id="panel-document"
+                  role="tabpanel"
+                  aria-labelledby="tab-document"
+                  className="tab-panel__page"
+                  hidden={tab !== 'document'}
+                >
+                  {selected ? (
                     <Preview page={selected} />
                   ) : (
                     <div className="empty-state">
                       <DocIcon size={28} />
                       <p>{ko.preview.empty}</p>
                     </div>
-                  )
-                ) : null}
-                {tab === 'review' ? <ReviewPanel spaceKey={activeSpaceKey} /> : null}
-                {tab === 'conflict' ? <ConflictsPanel spaceKey={activeSpaceKey} /> : null}
+                  )}
+                </div>
+                <div
+                  id="panel-review"
+                  role="tabpanel"
+                  aria-labelledby="tab-review"
+                  className="tab-panel__page"
+                  hidden={tab !== 'review'}
+                >
+                  <ReviewPanel key={activeSpaceKey} spaceKey={activeSpaceKey} />
+                </div>
+                <div
+                  id="panel-conflict"
+                  role="tabpanel"
+                  aria-labelledby="tab-conflict"
+                  className="tab-panel__page"
+                  hidden={tab !== 'conflict'}
+                >
+                  <ConflictsPanel key={activeSpaceKey} spaceKey={activeSpaceKey} />
+                </div>
               </div>
             </>
           ) : (

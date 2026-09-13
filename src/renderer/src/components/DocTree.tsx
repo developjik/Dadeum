@@ -30,7 +30,8 @@ function TreeItem({
             type="button"
             className={`tree-toggle${isCollapsed ? '' : ' tree-toggle--open'}`}
             aria-expanded={!isCollapsed}
-            aria-label={node.title}
+            aria-label={`${node.title} ${isCollapsed ? ko.tree.expand : ko.tree.collapse}`}
+            title={isCollapsed ? ko.tree.expand : ko.tree.collapse}
             onClick={() => onToggle(node.pageId)}
           >
             <ChevronIcon size={12} />
@@ -41,6 +42,8 @@ function TreeItem({
         <button
           type="button"
           className={`tree-row${selectedPath === node.path ? ' tree-row--selected' : ''}`}
+          aria-current={selectedPath === node.path ? 'page' : undefined}
+          title={node.title}
           onClick={() => onOpen(node.path)}
         >
           <span

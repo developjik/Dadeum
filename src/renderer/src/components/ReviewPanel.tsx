@@ -26,6 +26,32 @@ function CheckItem({
   )
 }
 
+/** 그룹(수정·신규·첨부) 헤더 — 클릭 시 해당 그룹 전체를 선택/해제한다. */
+function GroupLabel({
+  paths,
+  selected,
+  onToggle,
+  children,
+}: {
+  paths: string[]
+  selected: Set<string>
+  onToggle: (paths: string[]) => void
+  children: React.ReactNode
+}): React.ReactElement {
+  const allChecked = paths.length > 0 && paths.every((path) => selected.has(path))
+  return (
+    <label className="changeset-group__label">
+      <input
+        type="checkbox"
+        checked={allChecked}
+        disabled={paths.length === 0}
+        onChange={() => onToggle(paths)}
+      />
+      {children}
+    </label>
+  )
+}
+
 export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElement {
   const loadChangeset = useAppStore((s) => s.loadChangeset)
   const approveUpload = useAppStore((s) => s.approveUpload)
@@ -39,12 +65,44 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
   const busy = useAppStore((s) => s.busy)
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [confirming, setConfirming] = useState(false)
+  /** 펼쳐진 diff — 같은 버튼으로 다시 닫을 수 있다 */
+  const [openDiffs, setOpenDiffs] = useState<Set<string>>(new Set())
 
   const toggle = (path: string): void => {
     const next = new Set(selected)
     if (next.has(path)) next.delete(path)
     else next.add(path)
     setSelected(next)
+  }
+
+  /** 그룹(수정·신규·첨부) 단위 일괄 선택/해제 */
+  const toggleGroup = (paths: string[]): void => {
+    setSelected((prev) => {
+      const allSelected = paths.every((path) => prev.has(path))
+      const next = new Set(prev)
+      for (const path of paths) {
+        if (allSelected) next.delete(path)
+        else next.add(path)
+      }
+      return next
+    })
+  }
+
+  const toggleDiff = (path: string): void => {
+    if (openDiffs.has(path)) {
+      setOpenDiffs((prev) => {
+        const next = new Set(prev)
+        next.delete(path)
+        return next
+      })
+      return
+    }
+    setOpenDiffs((prev) => {
+      const next = new Set(prev)
+      next.add(path)
+      return next
+    })
+    void openDiff(path)
   }
 
   const total = changeset
@@ -64,6 +122,16 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
       : [],
   )
   const validSelected = new Set([...selected].filter((path) => changesetPaths.has(path)))
+
+  // 전체 선택/해제 — 현재 변경 세트의 선택 가능한 모든 경로
+  const allPaths = changeset
+    ? [
+        ...changeset.modified.map((page) => page.path),
+        ...changeset.added.map((page) => page.path),
+        ...changeset.attachments.map((file) => file.path),
+      ]
+    : []
+  const allSelected = allPaths.length > 0 && allPaths.every((path) => validSelected.has(path))
 
   return (
     <section className="review-pane" aria-label={ko.aria.uploadReview}>
@@ -98,6 +166,14 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
         <button
           type="button"
           className="btn btn--default"
+          disabled={busy || allPaths.length === 0}
+          onClick={() => setSelected(allSelected ? new Set() : new Set(allPaths))}
+        >
+          {allSelected ? ko.review.deselectAll : ko.review.selectAll}
+        </button>
+        <button
+          type="button"
+          className="btn btn--default"
           disabled={busy}
           onClick={() => {
             setSelected(new Set())
@@ -107,7 +183,12 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
           {ko.review.recheck}
         </button>
       </div>
-      {!changeset ? <p className="review-pane__hint">{ko.app.loading}</p> : null}
+      {!changeset ? (
+        <p className="review-pane__hint">
+          <span className="spinner spinner--xs" aria-hidden="true" />
+          {ko.app.loading}
+        </p>
+      ) : null}
 
       {reviewRunning || reviewVerdict || reviewNote ? (
         <section className="audit-card" aria-label={ko.review.auditTitle}>
@@ -157,7 +238,13 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
         <>
           {changeset.modified.length > 0 ? (
             <div className="changeset-group">
-              <span className="changeset-group__label">{ko.review.modified}</span>
+              <GroupLabel
+                paths={changeset.modified.map((page) => page.path)}
+                selected={validSelected}
+                onToggle={toggleGroup}
+              >
+                {ko.review.modified}
+              </GroupLabel>
               <ul className="cs-list">
                 {changeset.modified.map((page: ModifiedPage) => (
                   <li key={page.path} className="cs-item">
@@ -166,17 +253,22 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
                       checked={validSelected.has(page.path)}
                       onToggle={() => toggle(page.path)}
                     >
-                      <span className="cs-item__path">{page.path}</span>
+                      <span className="cs-item__path" title={page.path}>
+                        {page.path}
+                      </span>
                       <button
                         type="button"
-                        className="btn btn--default"
-                        onClick={() => void openDiff(page.path)}
+                        className={`btn btn--default${openDiffs.has(page.path) ? ' btn--tinted' : ''}`}
+                        aria-expanded={openDiffs.has(page.path)}
+                        onClick={() => toggleDiff(page.path)}
                       >
                         <DiffIcon />
                         {ko.review.diffLabel}
                       </button>
                     </CheckItem>
-                    {diffs[page.path] ? <DiffView changes={diffs[page.path]!} /> : null}
+                    {openDiffs.has(page.path) && diffs[page.path] ? (
+                      <DiffView changes={diffs[page.path]!} />
+                    ) : null}
                   </li>
                 ))}
               </ul>
@@ -185,7 +277,13 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
 
           {changeset.added.length > 0 ? (
             <div className="changeset-group">
-              <span className="changeset-group__label">{ko.review.added}</span>
+              <GroupLabel
+                paths={changeset.added.map((page) => page.path)}
+                selected={validSelected}
+                onToggle={toggleGroup}
+              >
+                {ko.review.added}
+              </GroupLabel>
               <ul className="cs-list">
                 {changeset.added.map((page) => (
                   <li key={page.path} className="cs-item">
@@ -194,8 +292,12 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
                       checked={validSelected.has(page.path)}
                       onToggle={() => toggle(page.path)}
                     >
-                      <span className="cs-item__label">{page.title}</span>
-                      <span className="cs-item__path">{page.path}</span>
+                      <span className="cs-item__label" title={page.title}>
+                        {page.title}
+                      </span>
+                      <span className="cs-item__path" title={page.path}>
+                        {page.path}
+                      </span>
                       <span className="badge badge--success">{ko.review.added}</span>
                     </CheckItem>
                   </li>
@@ -206,7 +308,13 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
 
           {changeset.attachments.length > 0 ? (
             <div className="changeset-group">
-              <span className="changeset-group__label">{ko.review.attachments}</span>
+              <GroupLabel
+                paths={changeset.attachments.map((file) => file.path)}
+                selected={validSelected}
+                onToggle={toggleGroup}
+              >
+                {ko.review.attachments}
+              </GroupLabel>
               <ul className="cs-list">
                 {changeset.attachments.map((attachment) => (
                   <li key={attachment.path} className="cs-item">
@@ -215,8 +323,12 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
                       checked={validSelected.has(attachment.path)}
                       onToggle={() => toggle(attachment.path)}
                     >
-                      <span className="cs-item__label">{attachment.fileName}</span>
-                      <span className="cs-item__path">{attachment.path}</span>
+                      <span className="cs-item__label" title={attachment.fileName}>
+                        {attachment.fileName}
+                      </span>
+                      <span className="cs-item__path" title={attachment.path}>
+                        {attachment.path}
+                      </span>
                       <span className="badge badge--neutral">{ko.review.attachments}</span>
                     </CheckItem>
                   </li>
@@ -227,7 +339,9 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
 
           {missingCount > 0 ? (
             <div className="changeset-group">
-              <span className="changeset-group__label">{ko.review.missing}</span>
+              <span className="changeset-group__label changeset-group__label--static">
+                {ko.review.missing}
+              </span>
               <ul className="cs-list">
                 {changeset.missing.map((page) => (
                   <li key={page.path} className="cs-item">

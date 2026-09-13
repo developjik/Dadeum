@@ -135,6 +135,11 @@ a {
   outline-offset: 1px;
 }
 
+/* 잉크(어두운) 표면 위 포커스 링 — 어두운 배경에서도 즉시 보이게 */
+.sidebar :focus-visible {
+  outline-color: var(--c-ink-accent);
+}
+
 ::selection {
   background: var(--c-accent-tint-hover);
 }
@@ -229,6 +234,17 @@ a {
   width: 30px;
   padding: 0;
   flex: none;
+}
+
+/* 열림 상태 토글(diff 보기 등) — 눌린 상태임을 틴트로 알린다 */
+.btn--tinted {
+  background: var(--c-accent-tint);
+  border-color: transparent;
+  color: var(--c-accent);
+}
+
+.btn--tinted:hover:not(:disabled) {
+  background: var(--c-accent-tint-hover);
 }
 
 .btn--block {
@@ -776,6 +792,18 @@ a {
   flex-direction: column;
 }
 
+/* 탭 패널 — 컴포넌트 표시(display)가 hidden 속성을 이기지 못하게 한다 */
+.tab-panel > [hidden] {
+  display: none;
+}
+
+.tab-panel__page {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
 /* ---------------------------------- 미리보기 ---------------------------------- */
 /* 스크롤은 탭 패널(.tab-panel)이 담당하고, 헤더는 그 안에 sticky로 붙는다. */
 .preview-pane {
@@ -988,6 +1016,14 @@ a {
   gap: 8px;
 }
 
+.review-pane__hint {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--c-text-3);
+  font-size: 12.5px;
+}
+
 .review-pane__summary {
   flex: 1;
   display: flex;
@@ -1009,6 +1045,21 @@ a {
   font-size: 12px;
   font-weight: 700;
   color: var(--c-text-2);
+  cursor: pointer;
+}
+
+.changeset-group__label input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  accent-color: var(--c-accent);
+  cursor: pointer;
+}
+
+/* 선택 불가 그룹(로컬 파일 없음) — 체크박스 없는 자리만큼 들여 정렬을 맞춘다 */
+.changeset-group__label--static {
+  cursor: default;
+  padding-left: 20px;
 }
 
 .cs-list {
@@ -1552,6 +1603,18 @@ a {
 
 .notice-banner__text {
   flex: 1;
+}
+
+.notice-banner .btn {
+  height: 22px;
+  padding: 0 8px;
+  font-size: 12px;
+  color: var(--c-success);
+}
+
+.notice-banner .btn:hover:not(:disabled) {
+  background: rgba(26, 122, 74, 0.12);
+  color: var(--c-success);
 }
 
 /* --------------------------- 업로드 2단계 확인 스트립 --------------------------- */

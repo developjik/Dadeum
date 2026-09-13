@@ -33,6 +33,7 @@ export const ko = {
     remoteDeleted: '원격에서 삭제됨',
     pull: '가져오기',
     pullCancel: '동기화 중단',
+    pullHint: '연결됐습니다. 스페이스 옆 가져오기 버튼으로 문서를 내려받으세요.',
     pullDone: (
       pages: number,
       attachments: number,
@@ -65,9 +66,13 @@ export const ko = {
   preview: {
     webLink: 'Confluence에서 보기',
     empty: '왼쪽에서 문서를 선택하세요',
+    carrierOnly:
+      '이 문서는 Confluence 전용 요소(레이아웃·매크로)만 담고 있어 로컬 미리보기가 제한됩니다. 원본은 [Confluence에서 보기]에서 확인하세요.',
   },
   tree: {
-    empty: '동기화된 문서가 없습니다',
+    empty: '동기화된 문서가 없습니다 — 스페이스 옆 가져오기 버튼으로 내려받으세요',
+    expand: '하위 페이지 펼치기',
+    collapse: '하위 페이지 접기',
   },
   review: {
     approve: '승인',
@@ -100,6 +105,8 @@ export const ko = {
     auditOk: '적합',
     auditWarn: '주의',
     auditError: '승인 보류 권고',
+    selectAll: '모두 선택',
+    deselectAll: '선택 해제',
   },
   conflict: {
     list: '충돌 후보',
@@ -128,6 +135,7 @@ export const ko = {
   auth: {
     siteUrl: '사이트 주소',
     email: '이메일',
+    emailPlaceholder: 'name@example.com',
     apiToken: 'API 토큰',
     tokenHint: 'id.atlassian.com에서 발급한 API 토큰을 입력하세요',
     tokenLink: 'API 토큰 발급 페이지 열기',

@@ -11,6 +11,9 @@ export function ConnectForm(): React.ReactElement {
   const [siteUrl, setSiteUrl] = useState('')
   const [email, setEmail] = useState('')
   const [apiToken, setApiToken] = useState('')
+  // 세 필드가 모두 채워졌을 때만 연결 시도 — 빈 값 제출로 서버 오류를 대신 낸다
+  const canSubmit =
+    siteUrl.trim().length > 0 && email.trim().length > 0 && apiToken.trim().length > 0
 
   return (
     <form
@@ -34,6 +37,11 @@ export function ConnectForm(): React.ReactElement {
             value={siteUrl}
             onChange={(e) => setSiteUrl(e.target.value)}
             placeholder="https://xxx.atlassian.net"
+            inputMode="url"
+            autoComplete="url"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
           />
         </label>
         <label className="field">
@@ -43,6 +51,11 @@ export function ConnectForm(): React.ReactElement {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
+            placeholder={ko.auth.emailPlaceholder}
+            autoComplete="email"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
           />
         </label>
         <label className="field">
@@ -52,6 +65,10 @@ export function ConnectForm(): React.ReactElement {
             type="password"
             value={apiToken}
             onChange={(e) => setApiToken(e.target.value)}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
           />
           <span className="field__hint">{ko.auth.tokenHint}</span>
           <button
@@ -64,7 +81,7 @@ export function ConnectForm(): React.ReactElement {
             {ko.auth.tokenLink}
           </button>
         </label>
-        <button type="submit" className="btn btn--primary btn--block" disabled={busy}>
+        <button type="submit" className="btn btn--primary btn--block" disabled={busy || !canSubmit}>
           {busy ? <span className="spinner" aria-hidden="true" /> : null}
           {ko.auth.connect}
         </button>

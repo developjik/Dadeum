@@ -10,3 +10,4 @@ golden-pass-workspace/
 artifacts/
 .env
 .env.*
+.mimosa/

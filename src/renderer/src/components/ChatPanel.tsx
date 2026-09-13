@@ -9,11 +9,28 @@ export function ChatPanel(): React.ReactElement {
   const sendChat = useAppStore((s) => s.sendChat)
   const [input, setInput] = useState('')
   const listRef = useRef<HTMLDivElement | null>(null)
+  const inputRef = useRef<HTMLTextAreaElement | null>(null)
 
   useEffect(() => {
     if (messages.length === 0 && !agentRunning) return
     listRef.current?.scrollTo({ top: listRef.current.scrollHeight })
   }, [messages, agentRunning])
+
+  /** 내용 높이에 맞춰 입력창을 늘린다(CSS min/max-height가 범위를 제한). */
+  const autosizeInput = (): void => {
+    const el = inputRef.current
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = `${Math.min(el.scrollHeight, 120)}px`
+  }
+
+  const send = (): void => {
+    const prompt = input.trim()
+    if (prompt.length === 0 || agentRunning) return
+    setInput('')
+    if (inputRef.current) inputRef.current.style.height = ''
+    void sendChat(prompt)
+  }
 
   const lastRole = messages.length > 0 ? messages[messages.length - 1]?.role : undefined
 
@@ -51,26 +68,24 @@ export function ChatPanel(): React.ReactElement {
         className="chat-inputbar"
         onSubmit={(event) => {
           event.preventDefault()
-          const prompt = input.trim()
-          if (prompt.length === 0 || agentRunning) return
-          setInput('')
-          void sendChat(prompt)
+          send()
         }}
       >
         <textarea
+          ref={inputRef}
           className="text-input chat-inputbar__textarea"
           rows={2}
           value={input}
           aria-label={ko.chat.placeholder}
-          onChange={(e) => setInput(e.target.value)}
+          onChange={(e) => {
+            setInput(e.target.value)
+            autosizeInput()
+          }}
           onKeyDown={(e) => {
             // Enter는 전송, Shift+Enter는 줄바꿈(여러 줄 지시 지원)
             if (e.key === 'Enter' && !e.shiftKey) {
               e.preventDefault()
-              const prompt = input.trim()
-              if (prompt.length === 0 || agentRunning) return
-              setInput('')
-              void sendChat(prompt)
+              send()
             }
           }}
           placeholder={ko.chat.placeholder}

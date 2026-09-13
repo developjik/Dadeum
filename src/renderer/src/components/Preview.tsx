@@ -5,9 +5,11 @@ import { ExternalIcon } from './icons'
 
 export function Preview({ page }: { page: SelectedPage }): React.ReactElement {
   const openExternal = useAppStore((s) => s.openExternal)
+  const pageLoading = useAppStore((s) => s.pageLoading)
   return (
     <section className="preview-pane" aria-label={ko.aria.pagePreview}>
       <header className="preview-pane__header">
+        {pageLoading ? <span className="spinner" aria-hidden="true" /> : null}
         <h1 className="preview-pane__title">{page.title}</h1>
         <span className="badge badge--neutral">v{page.version}</span>
         <button

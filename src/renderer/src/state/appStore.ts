@@ -37,6 +37,8 @@ interface AppUiState {
   spaces: ConfluenceSpace[]
   tree: PageTreeNode[]
   selected: SelectedPage | null
+  /** 문서 열기(openPage) 왕복 진행 중 — 미리보기 헤더의 로딩 표시용 */
+  pageLoading: boolean
   error?: string
   /** 자동으로 사라지는 성공·동기화 알림 */
   notice?: string
@@ -67,6 +69,7 @@ interface AppUiState {
 
   refreshStatus: () => Promise<void>
   dismissError: () => void
+  dismissNotice: () => void
   connect: (siteUrl: string, email: string, apiToken: string) => Promise<void>
   disconnect: () => Promise<void>
   pullSpace: (spaceKey: string) => Promise<void>
@@ -325,9 +328,16 @@ export const useAppStore = create<AppUiState>((set, get) => ({
   diffs: {},
   conflicts: [],
   notice: undefined,
+  pageLoading: false,
 
   dismissError: () => {
     set({ error: undefined })
+  },
+
+  dismissNotice: () => {
+    clearTimeout(noticeTimer)
+    noticeTimer = undefined
+    set({ notice: undefined })
   },
 
   refreshStatus: async () => {
@@ -363,7 +373,13 @@ export const useAppStore = create<AppUiState>((set, get) => ({
         email: result.email,
         spaces: result.spaces,
       })
-      if (result.spaces.length > 0) await get().pullSpace(result.spaces[0]!.key)
+      // 첫 스페이스를 자동으로 전량 풀하지 않는다 — 수천 페이지 팀 스페이스에서
+      // 사용자 동의 없이 수 분짜리 다운로드가 시작되는 문제가 있었다(실기기 E2E).
+      // 선택만 하고 가져오기는 사용자가 결정한다.
+      if (result.spaces.length > 0) {
+        await get().selectSpace(result.spaces[0]!.key)
+        set({ notice: ko.sync.pullHint })
+      }
     } catch (cause) {
       set({ error: String(cause instanceof Error ? cause.message : cause) })
     } finally {
@@ -632,6 +648,7 @@ export const useAppStore = create<AppUiState>((set, get) => ({
 
   openPage: async (path) => {
     const seq = ++openPageSeq
+    set({ pageLoading: true })
     try {
       const result = await api<{ title: string; url: string; version: number; markdown: string }>(
         'pages:read',
@@ -642,10 +659,11 @@ export const useAppStore = create<AppUiState>((set, get) => ({
       if (seq !== openPageSeq) return
       set({
         selected: { path, title: result.title, url: result.url, version: result.version, html },
+        pageLoading: false,
       })
     } catch (cause) {
       if (seq !== openPageSeq) return
-      set({ error: String(cause instanceof Error ? cause.message : cause) })
+      set({ error: String(cause instanceof Error ? cause.message : cause), pageLoading: false })
     }
   },
 
