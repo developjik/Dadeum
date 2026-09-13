@@ -94,12 +94,23 @@ export async function resolveConflict(options: {
       mkdirSync(dirname(backupPath), { recursive: true })
       writeFileSync(backupPath, readFileSync(absPath)) // 로컬 변경 1회 백업(trash는 allowlist 밖)
     }
+    const baseMeta = currentMeta(absPath)
     const updatedRaw = renderPageFile(
-      { ...currentMeta(absPath), version: remote.version, syncedAt: new Date().toISOString() },
+      { ...baseMeta, version: remote.version, syncedAt: new Date().toISOString() },
       markdown,
     )
     writeFileSync(absPath, updatedRaw, 'utf8')
-    db.updateContentHash(pageId, fileHashOf(updatedRaw))
+    // db의 version·title도 원격 판으로 갱신 — 옛값이 남으면 트리 표시·버전 검사가 어긋난다
+    db.upsertPage({
+      pageId,
+      spaceKey: baseMeta.spaceKey,
+      path: safePath,
+      title: remote.title || baseMeta.title,
+      version: remote.version,
+      parentId: baseMeta.parentId,
+      contentHash: fileHashOf(updatedRaw),
+      updatedAt: null,
+    })
     db.clearRemoteDeleted(pageId)
     return { applied: 'take-remote', backupPath }
   }

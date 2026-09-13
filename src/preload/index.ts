@@ -6,9 +6,13 @@ import { assertWhitelistedChannel } from '../core/ipc/channels'
  * channel 인자는 core 화이트리스트로 이중 검증된다.
  */
 const confluenceLocal = {
-  invoke: (channel: string, payload?: unknown): Promise<unknown> => {
+  invoke: async (channel: string, payload?: unknown): Promise<unknown> => {
     assertWhitelistedChannel(channel)
-    return ipcRenderer.invoke(channel, payload)
+    try {
+      return await ipcRenderer.invoke(channel, payload)
+    } catch (cause) {
+      throw reassembleIpcError(cause)
+    }
   },
   /** 에이전트 런 이벤트 스트림(단일 채널 — runId로 구분). */
   onAgentEvent: (
@@ -31,6 +35,33 @@ const confluenceLocal = {
     ipcRenderer.on('sync:event', wrapped as never)
     return () => ipcRenderer.removeListener('sync:event', wrapped as never)
   },
+}
+
+/** main이 마커로 보낸 구조화 오류를 Error로 재조립(kind/status 포함). */
+function reassembleIpcError(cause: unknown): unknown {
+  const raw = cause instanceof Error ? cause.message : String(cause)
+  const jsonStart = raw.indexOf('{')
+  if (jsonStart >= 0) {
+    try {
+      const parsed = JSON.parse(raw.slice(jsonStart)) as {
+        __ipcError?: boolean
+        name?: string
+        message?: string
+        kind?: string
+        status?: number
+      }
+      if (parsed.__ipcError) {
+        const error = new Error(parsed.message ?? raw)
+        error.name = parsed.name ?? 'IpcError'
+        if (parsed.kind !== undefined) (error as { kind?: string }).kind = parsed.kind
+        if (parsed.status !== undefined) (error as { status?: number }).status = parsed.status
+        return error
+      }
+    } catch {
+      // 마커가 아니면 원본 그대로
+    }
+  }
+  return cause instanceof Error ? cause : new Error(raw)
 }
 
 export type ConfluenceLocalApi = typeof confluenceLocal

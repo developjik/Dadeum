@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { app, safeStorage } from 'electron'
 import {
@@ -44,13 +44,12 @@ export function saveCredentials(
     tokenCiphertextBase64: encryptToken(safeStorageEncryptor, apiToken),
     savedAt: new Date().toISOString(),
   }
-  writeFileSync(credentialsFilePath(), encodeCredentials(stored), 'utf8')
+  writeFileSync(credentialsFilePath(), encodeCredentials(stored), { encoding: 'utf8', mode: 0o600 })
   return stored
 }
 
 export function clearCredentials(): void {
-  const path = credentialsFilePath()
-  if (existsSync(path)) writeFileSync(path, '', 'utf8')
+  rmSync(credentialsFilePath(), { force: true })
 }
 
 /** 저장된 자격증명으로 클라이언트를 만든다. 없으면 null. */

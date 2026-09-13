@@ -35,6 +35,8 @@ export function App(): React.ReactElement {
   const error = useAppStore((s) => s.error)
   const busy = useAppStore((s) => s.busy)
   const syncingSpace = useAppStore((s) => s.syncingSpace)
+  const syncingProgress = useAppStore((s) => s.syncingProgress)
+  const cancelPull = useAppStore((s) => s.cancelPull)
   const activeSpaceKey = useAppStore((s) => s.activeSpaceKey)
   const baseUrl = useAppStore((s) => s.baseUrl)
   const email = useAppStore((s) => s.email)
@@ -139,7 +141,7 @@ export function App(): React.ReactElement {
 
       <div className="app-body">
         <aside className="sidebar">
-          <section className="sidebar__spaces" aria-label="spaces">
+          <section className="sidebar__spaces" aria-label={ko.aria.spaces}>
             <span className="section-label sidebar__spaces-label">{ko.sidebar.spaces}</span>
             <ul className="space-list">
               {spaces.map((space) => {
@@ -165,12 +167,30 @@ export function App(): React.ReactElement {
                     >
                       {syncing ? <span className="spinner" aria-hidden="true" /> : <SyncIcon />}
                     </button>
+                    {syncing ? (
+                      <>
+                        {syncingProgress?.spaceKey === space.key ? (
+                          <span className="space-sync__progress">
+                            {syncingProgress.done}/{syncingProgress.total}
+                          </span>
+                        ) : null}
+                        <button
+                          type="button"
+                          className="btn btn--icon btn--subtle space-sync"
+                          title={ko.sync.pullCancel}
+                          aria-label={ko.sync.pullCancel}
+                          onClick={() => void cancelPull(space.key)}
+                        >
+                          <CloseIcon size={12} />
+                        </button>
+                      </>
+                    ) : null}
                   </li>
                 )
               })}
             </ul>
           </section>
-          <section className="sidebar__tree" aria-label="documents">
+          <section className="sidebar__tree" aria-label={ko.aria.documents}>
             <span className="section-label">{ko.sidebar.pages}</span>
             <DocTree
               tree={tree}
@@ -183,9 +203,21 @@ export function App(): React.ReactElement {
         <main className="main">
           {activeSpaceKey ? (
             <>
-              <nav className="tabs" aria-label="workspace-tabs">
+              <div
+                className="tabs"
+                aria-label={ko.aria.workspaceTabs}
+                role="tablist"
+                onKeyDown={(event) => {
+                  if (event.key !== 'ArrowRight' && event.key !== 'ArrowLeft') return
+                  const order: TabKey[] = ['document', 'review', 'conflict']
+                  const step = event.key === 'ArrowRight' ? 1 : order.length - 1
+                  activateTab(order[(order.indexOf(tab) + step) % order.length])
+                }}
+              >
                 <button
                   type="button"
+                  role="tab"
+                  aria-selected={tab === 'document'}
                   className={`tab${tab === 'document' ? ' tab--active' : ''}`}
                   onClick={() => setTab('document')}
                 >
@@ -193,6 +225,8 @@ export function App(): React.ReactElement {
                 </button>
                 <button
                   type="button"
+                  role="tab"
+                  aria-selected={tab === 'review'}
                   className={`tab${tab === 'review' ? ' tab--active' : ''}`}
                   onClick={() => activateTab('review')}
                 >
@@ -201,13 +235,15 @@ export function App(): React.ReactElement {
                 </button>
                 <button
                   type="button"
+                  role="tab"
+                  aria-selected={tab === 'conflict'}
                   className={`tab${tab === 'conflict' ? ' tab--active' : ''}`}
                   onClick={() => activateTab('conflict')}
                 >
                   {ko.tabs.conflict}
                   {conflictCount > 0 ? <span className="tab__count">{conflictCount}</span> : null}
                 </button>
-              </nav>
+              </div>
               <div className="tab-panel">
                 {tab === 'document' ? (
                   selected ? (
@@ -231,7 +267,7 @@ export function App(): React.ReactElement {
           )}
         </main>
 
-        <section className="chat-rail" aria-label="agent-chat">
+        <section className="chat-rail" aria-label={ko.aria.agentChat}>
           {activeSpaceKey ? <ChatPanel /> : null}
         </section>
       </div>

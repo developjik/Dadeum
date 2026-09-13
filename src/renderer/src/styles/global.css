@@ -32,6 +32,7 @@
   --c-danger: #c9372c;
   --c-danger-hover: #ab2c22;
   --c-danger-bg: #fceceb;
+  --c-danger-bg-strong: #f8dcd9;
 
   /* diff */
   --c-diff-add-bg: #e6f6ec;
@@ -44,7 +45,6 @@
   --radius-md: 6px;
   --radius-lg: 10px;
   --shadow-card: 0 1px 3px rgba(9, 30, 66, 0.12), 0 8px 24px rgba(9, 30, 66, 0.1);
-  --shadow-pop: 0 4px 12px rgba(9, 30, 66, 0.18);
 
   /* 타이포 */
   --font-ui:
@@ -190,15 +190,6 @@ a {
 
 .btn--danger:hover:not(:disabled) {
   background: var(--c-danger-hover);
-}
-
-.btn--danger-subtle {
-  background: var(--c-danger-bg);
-  color: var(--c-danger);
-}
-
-.btn--danger-subtle:hover:not(:disabled) {
-  background: #f8dcd9;
 }
 
 .btn--icon {
@@ -1324,7 +1315,7 @@ a {
 }
 
 .chat-stop:hover:not(:disabled) {
-  background: #f8dcd9;
+  background: var(--c-danger-bg-strong);
 }
 
 /* ---------------------------------- 연결/로딩 화면 ---------------------------------- */
@@ -1449,9 +1440,9 @@ a {
   align-items: center;
   gap: 8px;
   padding: 8px 20px;
-  background: var(--color-success-soft, rgba(48, 164, 108, 0.12));
-  color: var(--color-success, #1f7a4d);
-  border-bottom: 1px solid var(--color-border, rgba(0, 0, 0, 0.08));
+  background: var(--c-success-bg);
+  color: var(--c-success);
+  border-bottom: 1px solid var(--c-border);
   font-size: 13px;
 }
 
@@ -1464,18 +1455,22 @@ a {
   display: flex;
   align-items: center;
   gap: 8px;
+  border: none;
+  margin: 0;
+  padding: 0;
+  min-width: 0;
 }
 
 .review-actions__confirm-text {
   font-weight: 600;
-  color: var(--color-danger, #b3261e);
+  color: var(--c-danger);
 }
 
 /* ------------------------------ 충돌 덮어쓰기 확인 ----------------------------- */
 .conflict-card__confirm {
   flex: 1;
   font-weight: 600;
-  color: var(--color-danger, #b3261e);
+  color: var(--c-danger);
 }
 
 /* ------------------------------- 폼 필드 보조 링크 ------------------------------ */
@@ -1496,5 +1491,11 @@ a {
 
 /* ------------------------------ 첨부 삭제 결과 행 ------------------------------ */
 .outcome-row--neutral {
-  color: var(--color-text-secondary, #5f6368);
+  color: var(--c-text-2);
+}
+
+.space-sync__progress {
+  font-size: 11px;
+  color: var(--c-text-3);
+  font-variant-numeric: tabular-nums;
 }

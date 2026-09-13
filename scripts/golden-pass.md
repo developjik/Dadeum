@@ -18,7 +18,6 @@ v1 통과 기준은 이 시나리오 하나다:
 export CONFLUENCE_BASE_URL="https://<test-site>.atlassian.net"
 export CONFLUENCE_EMAIL="you@example.com"
 export CONFLUENCE_API_TOKEN="ATATT..."
-export CONFLUENCE_TEST_SPACE_KEY="E2E"      # 테스트 스페이스 키
 pnpm exec tsx scripts/golden-pass.ts
 ```
 

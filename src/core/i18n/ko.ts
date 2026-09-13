@@ -25,14 +25,14 @@ export const ko = {
     noSpace: '왼쪽에서 스페이스를 선택하세요',
   },
   sync: {
-    idle: '대기',
     pulling: '동기화 중',
-    pushing: '업로드 중',
     agentRunning: '에이전트 편집 중',
-    deferred: '동기화 보류',
+    authExpired: (spaceKey: string) =>
+      `API 토큰이 만료되어 ${spaceKey ? `${spaceKey} ` : ''}자동 동기화를 중단했습니다. 다시 연결하세요.`,
     conflictCandidates: (count: number) => `충돌 후보 ${count}건`,
     remoteDeleted: '원격에서 삭제됨',
     pull: '가져오기',
+    pullCancel: '동기화 중단',
     pullDone: (
       pages: number,
       attachments: number,
@@ -40,7 +40,7 @@ export const ko = {
       tombstoned: number,
       failed = 0,
     ) =>
-      `${pages}페이지 · 첨부 ${attachments}건 동기화됨` +
+      `${pages}페이지 동기화됨${attachments > 0 ? ` · 첨부 ${attachments}건` : ''}` +
       (skipped > 0 ? ` (로컬 변경 ${skipped}건 보호)` : '') +
       (tombstoned > 0 ? ` · 원격 삭제 ${tombstoned}건 정리` : '') +
       (failed > 0 ? ` · 실패 ${failed}건(재동기화 필요)` : ''),
@@ -49,6 +49,7 @@ export const ko = {
     placeholder: '에이전트에게 지시하기',
     send: '보내기',
     cancel: '에이전트 중지',
+    cancelPending: '에이전트 시작 중입니다. 잠시 후 다시 중지하세요.',
     terminalPrefix: '에이전트 종료:',
     errorPrefix: '오류:',
     title: '에이전트',
@@ -68,16 +69,11 @@ export const ko = {
   },
   review: {
     approve: '승인',
-    reject: '보류',
-    diffTitle: '업로드 검토',
-    reviewUpload: '업로드 검토',
     empty: '변경된 문서가 없습니다',
     uploaded: '업로드 완료',
     conflictNotice: '충돌 — 원격이 변경되었습니다',
     remoteDeletedNotice: '원격에서 삭제된 페이지입니다',
     failedNotice: '업로드 실패',
-    addedPrefix: '신규:',
-    attachmentPrefix: '첨부:',
     diffLabel: 'diff 보기',
     recheck: '다시 검사',
     modified: '수정',
@@ -96,7 +92,6 @@ export const ko = {
       '페이지 기록은 있지만 로컬 파일이 사라졌습니다. 업로드 대상에서 제외되며, 삭제가 의도라면 Confluence에서 페이지를 삭제하세요.',
   },
   conflict: {
-    title: '충돌이 감지되었습니다',
     list: '충돌 후보',
     none: '충돌 후보가 없습니다',
     localChanges: '로컬 변경',
@@ -117,5 +112,17 @@ export const ko = {
     tokenLink: 'API 토큰 발급 페이지 열기',
     connect: '연결',
     disconnect: '연결 해제',
+  },
+  aria: {
+    spaces: '스페이스 목록',
+    documents: '문서 목록',
+    workspaceTabs: '작업 탭',
+    agentChat: '에이전트 채팅',
+    connect: 'Confluence 연결',
+    uploadReview: '업로드 검토',
+    confirmUpload: '업로드 확정',
+    conflicts: '충돌 처리',
+    pagePreview: '문서 미리보기',
+    documentTree: '문서 트리',
   },
 } as const

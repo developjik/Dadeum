@@ -28,6 +28,7 @@ import {
 } from './sync/pollCoordinator'
 import { pullIncremental } from './sync/pullIncremental'
 import { pullSpaceByKey } from './sync/pullService'
+import { broadcastSyncEvent } from './sync/syncNotifier'
 import {
   getWorkspaceDb,
   isAllowedExternalUrl,
@@ -66,6 +67,9 @@ function requireClient(): ConfluenceClient {
 }
 
 export const chatRuns = new ChatRunService()
+
+/** 진행 중 전체 pull의 취소 요청 등록(spaces:pull ↔ pull:cancel). */
+const pullCancelRequests = new Set<string>()
 chatRuns.registerAdapter(new ClaudeCodeAdapter())
 
 /**
@@ -76,9 +80,12 @@ async function restoreAutoPull(): Promise<void> {
   const client = createClientFromStoredCredentials()
   if (!client) return
   const db = getWorkspaceDb()
-  for (const spaceKey of stoppedSpaces(db)) {
+  const stopped = stoppedSpaces(db)
+  if (stopped.length === 0) return
+  // listAllSpaces는 페이지네이션 순회를 동반하는 비싼 호출 — 스페이스마다 반복하지 않는다
+  const spaces = await client.listAllSpaces()
+  for (const spaceKey of stopped) {
     if (isAutoPullRunning(spaceKey)) continue
-    const spaces = await client.listAllSpaces()
     const space = spaces.find((candidate) => candidate.key === spaceKey)
     if (!space) continue
     startAutoPull({ client, space, workspaceRoot: resolveWorkspaceRoot(), db })
@@ -106,8 +113,6 @@ export function registerAuthAndSpaceHandlers(): void {
     const spaceKey = String(input.spaceKey ?? '')
     const prompt = String(input.prompt ?? '')
     if (!spaceKey || !prompt) throw new Error('spaceKey와 prompt가 필요합니다')
-    const client = requireClient()
-    void client
     const spaceRoot = join(resolveWorkspaceRoot(), 'spaces', safeSpaceDirName(spaceKey))
     return chatRuns.startRun({
       sender,
@@ -241,11 +246,24 @@ export function registerAuthAndSpaceHandlers(): void {
     const space = spaces.find((candidate) => candidate.key === spaceKey)
     if (!space) throw new Error(`스페이스를 찾을 수 없습니다: ${spaceKey}`)
 
-    return await pullSpaceByKey({
-      client,
-      spaceKey,
-      workspaceRoot: resolveWorkspaceRoot(),
-      db: getWorkspaceDb(),
-    })
+    pullCancelRequests.delete(spaceKey)
+    try {
+      return await pullSpaceByKey({
+        client,
+        spaceKey,
+        workspaceRoot: resolveWorkspaceRoot(),
+        db: getWorkspaceDb(),
+        onProgress: (done, total) =>
+          broadcastSyncEvent({ type: 'pull-progress', spaceKey, done, total }),
+        shouldContinue: () => !pullCancelRequests.has(spaceKey),
+      })
+    } finally {
+      pullCancelRequests.delete(spaceKey)
+    }
+  })
+  registerIpcHandler('pull:cancel', (payload) => {
+    const spaceKey = String((payload as { spaceKey?: string })?.spaceKey ?? '')
+    if (spaceKey) pullCancelRequests.add(spaceKey)
+    return { ok: true }
   })
 }

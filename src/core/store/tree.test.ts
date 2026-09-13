@@ -47,3 +47,24 @@ describe('buildPageTree', () => {
     expect(tree[0]?.remoteDeleted).toBe(true)
   })
 })
+
+describe('다중 노드 parentId 순환(P3)', () => {
+  it('2-순환(A↔B) 페이지가 트리에서 사라지지 않는다', () => {
+    const tree = buildPageTree([row('a', 'A', 'b'), row('b', 'B', 'a')])
+    const visible = new Set(tree.flatMap(collectIds))
+    expect(visible.has('a')).toBe(true)
+    expect(visible.has('b')).toBe(true)
+  })
+
+  it('3-순환(A→B→C→A)도 유실 없이 표시된다', () => {
+    const tree = buildPageTree([row('a', 'A', 'c'), row('b', 'B', 'a'), row('c', 'C', 'b')])
+    const visible = new Set(tree.flatMap(collectIds))
+    expect(visible.has('a')).toBe(true)
+    expect(visible.has('b')).toBe(true)
+    expect(visible.has('c')).toBe(true)
+  })
+})
+
+function collectIds(node: PageTreeNode): string[] {
+  return [node.pageId, ...node.children.flatMap(collectIds)]
+}

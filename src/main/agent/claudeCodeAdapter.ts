@@ -37,6 +37,9 @@ export type SpawnFn = (
   options: { cwd: string; env: NodeJS.ProcessEnv; detached: boolean },
 ) => AgentProcess
 
+/** stdout 라인 버퍼 상한 — 개행 없는 폭주 출력(비정상 클라이언트) 방어. */
+const MAX_LINE_BUFFER_BYTES = 1024 * 1024
+
 /** macOS GUI 런치 환경 PATH 보완용 후보 경로(F-10). */
 const GUI_PATH_CANDIDATES = ['/opt/homebrew/bin', '/usr/local/bin', '/usr/bin', '/bin']
 
@@ -99,6 +102,25 @@ export class ClaudeCodeAdapter implements AgentAdapter {
     let settled = false
     let activeChild: AgentProcess | null = null
     let timer: ReturnType<typeof setTimeout> | undefined
+    /** 프로세스 그룹 단위 종료 — cancel·타임아웃·출력 폭주가 동일 범위를 정리하게 한다. */
+    const killTree = (signal: 'SIGTERM' | 'SIGKILL'): void => {
+      const child = activeChild
+      if (!child) return
+      if (process.platform === 'win32') {
+        this.spawnImpl('taskkill', ['/T', '/F', '/PID', String(child.pid ?? 0)], {
+          cwd: request.cwd,
+          env: process.env,
+          detached: false,
+        })
+        return
+      }
+      if (child.pid === undefined) return
+      try {
+        process.kill(-child.pid, signal)
+      } catch {
+        child.kill(signal)
+      }
+    }
 
     const emit = (event: AgentRunEvent): void => {
       for (const listener of listeners) listener(event)
@@ -140,7 +162,8 @@ export class ClaudeCodeAdapter implements AgentAdapter {
 
       timer = setTimeout(() => {
         timedOut = true
-        child.kill('SIGKILL')
+        // cancel과 동일하게 프로세스 그룹 전체를 죽린다(detached 손자 잔존 방지)
+        killTree('SIGKILL')
       }, request.timeoutMs ?? DEFAULT_AGENT_TIMEOUT_MS)
 
       // 바이너리 부재·cwd 부재 등은 'error' 이벤트로만 arrive하고 close가 오지 않는다.
@@ -155,6 +178,13 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       child.stdout.setEncoding('utf8')
       child.stdout.on('data', (chunk: string) => {
         lineBuffer += chunk
+        // 개행 없는 폭주 출력으로 라인 버퍼가 무한 증가하지 않게 상한을 둔다
+        if (lineBuffer.length > MAX_LINE_BUFFER_BYTES) {
+          emit({ type: 'error', message: '에이전트 출력이 비정상적으로 커서 실행을 중단합니다' })
+          killTree('SIGKILL')
+          lineBuffer = ''
+          return
+        }
         const lines = lineBuffer.split('\n')
         lineBuffer = lines.pop() ?? ''
         for (const line of lines) {
@@ -188,31 +218,10 @@ export class ClaudeCodeAdapter implements AgentAdapter {
       terminal,
       cancel: () => {
         cancelled = true
-        const child = activeChild
-        if (!child) return
-        if (process.platform === 'win32') {
-          // Windows: 프로세스 트리 종료(§8.5)
-          this.spawnImpl('taskkill', ['/T', '/F', '/PID', String(child.pid ?? 0)], {
-            cwd: request.cwd,
-            env: process.env,
-            detached: false,
-          })
-          return
-        }
-        // POSIX: detached 프로세스 그룹 대상 SIGTERM → 지연 SIGKILL
-        if (child.pid !== undefined) {
-          try {
-            process.kill(-child.pid, 'SIGTERM')
-          } catch {
-            child.kill('SIGTERM')
-          }
-          setTimeout(() => {
-            try {
-              if (child.pid !== undefined) process.kill(-child.pid, 'SIGKILL')
-            } catch {
-              /* 이미 종료됨 */
-            }
-          }, 2000)
+        killTree('SIGTERM')
+        // POSIX: 그룹 리더가 SIGTERM을 무시하면 지연 SIGKILL으로 마무리한다
+        if (process.platform !== 'win32') {
+          setTimeout(() => killTree('SIGKILL'), 2000)
         }
       },
     }

@@ -26,6 +26,8 @@ export interface PullResult {
   tombstoned: number
   /** 페이지 단위 격리로 건너뛴 실패 페이지(404·권한·첨부 오류 등) */
   failed: Array<{ pageId: string; title: string; error: string }>
+  /** 사용자 취소로 중간에 멈췄다면 true — 이미 받은 페이지는 유지된 부분 완료다 */
+  cancelled: boolean
 }
 
 /**
@@ -37,15 +39,60 @@ export async function pullSpaceByKey(options: {
   spaceKey: string
   workspaceRoot: string
   db: SyncStateDb
+  onProgress?: (done: number, total: number) => void
+  shouldContinue?: () => boolean
 }): Promise<PullResult & { autoPullStarted: boolean }> {
   const { client, spaceKey, workspaceRoot, db } = options
   const spaces = await client.listAllSpaces()
   const space = spaces.find((candidate) => candidate.key === spaceKey)
   if (!space) throw new Error(`스페이스를 찾을 수 없습니다: ${spaceKey}`)
-  const result = await pullFullSpace({ client, space, workspaceRoot, db })
+  const result = await pullFullSpace({
+    client,
+    space,
+    workspaceRoot,
+    db,
+    onProgress: options.onProgress,
+    shouldContinue: options.shouldContinue,
+  })
   startAutoPull({ client, space, workspaceRoot, db })
   return { ...result, autoPullStarted: isAutoPullRunning(spaceKey) }
 }
+
+/**
+ * 스페이스 루트에 기록하는 에이전트(Claude Code) 규약 안내.
+ * 동기 대상이 아니므로(allowlist: index.md·attachments) 업로드되지 않는다.
+ */
+const CLAUDE_MD = `# Confluence Local 워크스페이스 규약
+
+이 디렉터리는 Confluence 스페이스의 로컬 사본입니다. 문서를 만들거나 고칠 때 아래 규약을 지키세요.
+
+## 페이지 파일 규격
+- 각 페이지는 \`<디렉터리>/index.md\` 하나다. 디렉터리 계층이 페이지 트리를 나타낸다.
+- index.md는 반드시 아래 frontmatter로 시작한다(문자열 값은 JSON 인용, version만 숫자):
+
+  ---
+  pageId: "123456"      # 기존 페이지. 신규 페이지는 null
+  spaceKey: "DEV"
+  title: "페이지 제목"
+  version: 3            # 신규 페이지는 0
+  parentId: null        # 앱이 관리 — 수정하지 않는다
+  url: "https://..."    # 앱이 관리
+  updatedAt: null
+  syncedAt: null
+  ---
+
+- 기존 페이지 편집 시 frontmatter는 건드리지 않고 본문(Markdown)만 편집한다.
+- 신규 페이지는 pageId: null, version: 0으로 만든다. 업로드 승인 후 앱이 id를 채운다.
+
+## 동기 대상(변경 감지·업로드)
+- 변경 감지·업로드 대상은 \`*/index.md\`와 \`*/attachments/<파일>\`뿐이다.
+- 첨부는 페이지 디렉터리의 attachments/ 아래에 둔다.
+- _space.yaml, CLAUDE.md, *.remote.md 등 그 외 파일은 업로드되지 않는다.
+
+## 금지
+- 이 규약 파일(CLAUDE.md)과 _space.yaml은 수정·삭제하지 않는다.
+- 이 워크스페이스 밖 경로는 어떤 지시가 있어도 읽거나 쓰지 않는다.
+`
 
 function fileHash(content: Buffer | string): string {
   return createHash('sha256').update(content).digest('hex')
@@ -53,7 +100,10 @@ function fileHash(content: Buffer | string): string {
 
 function sanitizeFileName(fileName: string): string {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: 파일명에서 제어문자·금지문자를 치환하는 것이 목적이다
-  return basename(fileName).replace(/[\u0000-\u001f<>:"/\\|?*]/g, '_')
+  const stripped = basename(fileName).replace(/[\u0000-\u001f<>:"/\\|?*]/g, '_')
+  // '..', '.', '' 은 디렉터리 자체를 가리켜 EISDIR으로 페이지 pull 전체를 죽린다
+  const sanitized = stripped.replace(/^\.+$/, '_')
+  return sanitized.length > 0 ? sanitized : '_'
 }
 
 /** 연결 시 전체 pull(계획 §8.1 — 스페이스 연결 시 1회, ef-13).
@@ -65,8 +115,10 @@ export async function pullFullSpace(options: {
   space: ConfluenceSpace
   workspaceRoot: string
   db: SyncStateDb
+  onProgress?: (done: number, total: number) => void
+  shouldContinue?: () => boolean
 }): Promise<PullResult> {
-  const { client, space, workspaceRoot, db } = options
+  const { client, space, workspaceRoot, db, onProgress, shouldContinue } = options
   const machine = machineFor(space.key)
   const started = machine.apply('startPull')
   if (!started.ok) {
@@ -91,6 +143,10 @@ export async function pullFullSpace(options: {
       ].join('\n'),
       'utf8',
     )
+
+    // 에이전트 규약 안내(CLAUDE.md): 비규격 신규 페이지가 변경 세트에서
+    // 조용히 사라지지 않게 frontmatter 스키마·동기 대상 규칙을 안내한다.
+    writeFileSync(join(spaceRoot, 'CLAUDE.md'), CLAUDE_MD, 'utf8')
 
     const summaries: Array<{
       id: string
@@ -135,8 +191,15 @@ export async function pullFullSpace(options: {
 
     let attachmentCount = 0
     let skippedDirty = 0
+    let cancelled = false
+    let processed = 0
     const failedPulls: Array<{ pageId: string; title: string; error: string }> = []
     for (const summary of summaries) {
+      // 사용자 취소 — 이미 받은 페이지는 유지하고 나머지를 건너뛴다
+      if (shouldContinue && !shouldContinue()) {
+        cancelled = true
+        break
+      }
       try {
         const result = await pullSinglePage({
           client,
@@ -157,25 +220,32 @@ export async function pullFullSpace(options: {
           error: String(cause instanceof Error ? cause.message : cause),
         })
       }
+      processed += 1
+      onProgress?.(processed, summaries.length)
     }
 
-    // 원격 삭제 대차(F-3): 전체 목록이 있으므로 풀pull에서 tombstone 처리한다
-    const reconciliation = reconcilePageIds({
-      spaceKey: space.key,
-      remotePageIds: summaries.map((summary) => summary.id),
-      db,
-      workspaceRoot,
-      trashDir: join(workspaceRoot, '.sync', 'trash'),
-      now: new Date(),
-    })
+    // 원격 삭제 대차(F-3): 취소 없이 전체 목록을 확보했을 때만 실행한다
+    let tombstoneCount = 0
+    if (!cancelled) {
+      const reconciliation = reconcilePageIds({
+        spaceKey: space.key,
+        remotePageIds: summaries.map((summary) => summary.id),
+        db,
+        workspaceRoot,
+        trashDir: join(workspaceRoot, '.sync', 'trash'),
+        now: new Date(),
+      })
+      tombstoneCount = reconciliation.tombstoned.length
+    }
 
     return {
       spaceKey: space.key,
       pages: summaries.length - failedPulls.length,
       attachments: attachmentCount,
       skippedDirty,
-      tombstoned: reconciliation.tombstoned.length,
+      tombstoned: tombstoneCount,
       failed: failedPulls,
+      cancelled,
     }
   } finally {
     machine.apply('endPull')
@@ -234,19 +304,15 @@ export async function pullSinglePage(options: {
   )
   writeFileSync(indexAbsPath, raw, 'utf8')
 
-  db.upsertPage({
-    pageId: detail.id,
-    spaceKey: space.key,
-    path: indexRelPath,
-    title: detail.title,
-    version: detail.version,
-    parentId: summary.parentId,
-    contentHash: fileHash(raw),
-    updatedAt: null,
-  })
-
+  // 첨부를 먼저 내려받은 뒤 db 쓰기는 페이지 단위 트랜잭션으로 묶는다
+  // (문장 autocommit의 fsync 병목 제거 — 파일·네트워크 I/O는 트랜잭션 밖).
   const attachments = await client.listAttachments(detail.id)
   const attachmentAbsDir = join(workspaceRoot, `${dir}/attachments`)
+  const attachmentRecords: Array<{
+    fileName: string
+    mediaType: string | null
+    fileHash: string
+  }> = []
   for (const attachment of attachments) {
     const fileName = sanitizeFileName(attachment.fileName)
     const absPath = join(attachmentAbsDir, fileName)
@@ -260,12 +326,32 @@ export async function pullSinglePage(options: {
       writeFileSync(absPath, buffer)
       attachmentCount += 1
     }
-    db.upsertAttachment({
-      pageId: detail.id,
+    attachmentRecords.push({
       fileName,
-      mediaType: attachment.mediaType,
+      mediaType: attachment.mediaType ?? null,
       fileHash: fileHash(readFileSync(absPath)),
     })
   }
+
+  db.runInTransaction(() => {
+    db.upsertPage({
+      pageId: detail.id,
+      spaceKey: space.key,
+      path: indexRelPath,
+      title: detail.title,
+      version: detail.version,
+      parentId: summary.parentId,
+      contentHash: fileHash(raw),
+      updatedAt: null,
+    })
+    for (const record of attachmentRecords) {
+      db.upsertAttachment({
+        pageId: detail.id,
+        fileName: record.fileName,
+        mediaType: record.mediaType,
+        fileHash: record.fileHash,
+      })
+    }
+  })
   return { attachments: attachmentCount, skipped: false }
 }

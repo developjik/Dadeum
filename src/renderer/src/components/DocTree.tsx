@@ -92,7 +92,7 @@ export function DocTree({
 
   if (tree.length === 0) return <p className="tree__empty">{ko.tree.empty}</p>
   return (
-    <nav className="tree" aria-label="document-tree">
+    <nav className="tree" aria-label={ko.aria.documentTree}>
       <ul>
         {tree.map((node) => (
           <TreeItem

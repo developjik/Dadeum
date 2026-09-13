@@ -11,13 +11,19 @@ import { pullSinglePage } from './pullService'
  * 증분 pull 1회(계획 §8.1): lastmodified 증분(CQL, 5분 overlap) → 변경 페이지만
  * 재변환·갱신 → dirty 파일 보호(해시 불일치는 건드리지 않고 충돌 후보로 남김).
  */
+
+export interface IncrementalPullResult {
+  updated: string[]
+  skippedDirty: string[]
+  failed: string[]
+}
 export async function pullIncremental(options: {
   client: ConfluenceClient
   space: ConfluenceSpace
   workspaceRoot: string
   db: SyncStateDb
   sinceIso: string
-}): Promise<{ updated: string[]; skippedDirty: string[]; failed: string[] }> {
+}): Promise<IncrementalPullResult> {
   const { client, space, workspaceRoot, db, sinceIso } = options
   const machine = machineFor(space.key)
   const started = machine.apply('startPull')

@@ -182,7 +182,17 @@ async function pushOne(
 
   if (!pageIdIsNumeric) {
     // 신규 생성(AC-9): 부모 먼저 업로드되도록 위상 정렬된 순서를 신뢰한다.
-    const parentId = meta.parentId && /^\d+$/.test(meta.parentId) ? meta.parentId : undefined
+    let parentId = meta.parentId && /^\d+$/.test(meta.parentId) ? meta.parentId : undefined
+    if (!parentId) {
+      // 디렉터리 계층 = 페이지 트리(§7): 경로상 부모 index.md의 pageId로 계층을 복원한다
+      // (스페이스 루트 생성 방지 — 부모 없이 만들면 계층 복원이 무기한 미뤄진다)
+      const parentRel = relPath.replace(/\/[^/]+\/index\.md$/, '/index.md')
+      const parentAbs = join(workspaceRoot, parentRel)
+      if (parentRel !== relPath && existsSync(parentAbs)) {
+        const parentPageId = parsePageFile(readFileSync(parentAbs, 'utf8')).meta.pageId
+        if (/^\d+$/.test(parentPageId)) parentId = parentPageId
+      }
+    }
     const created = await client.createPage({ spaceId, parentId, title: meta.title, storageValue })
     if (created.version !== 1) {
       throw new Error(`신규 생성 응답 버전이 비정상입니다: ${created.version}`)

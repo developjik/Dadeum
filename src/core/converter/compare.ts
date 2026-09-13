@@ -21,6 +21,8 @@ function isWhitespaceOnly(node: XmlNode): boolean {
 function nodesEqual(a: XmlNode, b: XmlNode): boolean {
   if (a.nodeType !== b.nodeType) return false
   if (isText(a) && isText(b)) return (a.nodeValue ?? '') === (b.nodeValue ?? '')
+  // CDATA(4)·주석(8)은 내용까지 비교 — 무손실 게이트가 리터럴 변질을 놓치지 않게 한다
+  if (a.nodeType === 4 || a.nodeType === 8) return (a.nodeValue ?? '') === (b.nodeValue ?? '')
   if (!isElement(a) || !isElement(b)) return true
 
   if (a.nodeName !== b.nodeName) return false

@@ -1,5 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, renameSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { fileHashOf } from '../store/hash'
 import type { PageRecord, SyncStateDb } from '../store/syncState'
 
@@ -44,6 +44,12 @@ export function reconcilePageIds(options: {
       const targetDir = join(tombstoneDir, page.path.replace(/\/index\.md$/, ''))
       mkdirSync(targetDir, { recursive: true })
       renameSync(absPath, join(targetDir, 'index.md'))
+      // 첨부 디렉터리도 함께 이동 — 남기면 원격 삭제 페이지의 파일이 영구 고아가 된다.
+      // 페이지 디렉터리 전체를 옮기지 않는다(하위 페이지 디렉터리가 그 안에 살아 있다).
+      const attachmentsDir = join(dirname(absPath), 'attachments')
+      if (existsSync(attachmentsDir)) {
+        renameSync(attachmentsDir, join(targetDir, 'attachments'))
+      }
     }
     db.markRemoteDeleted(page.pageId)
     result.tombstoned.push(page.pageId)

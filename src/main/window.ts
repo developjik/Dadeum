@@ -31,6 +31,11 @@ export function createMainWindow(): BrowserWindow {
     }
   })
 
+  // 렌더러 크래시 시 백색 창 방치 없이 재로드한다(깨끗한 종료 제외)
+  win.webContents.on('render-process-gone', (_event, details) => {
+    if (details.reason !== 'clean-exit') win.reload()
+  })
+
   const devUrl = process.env.ELECTRON_RENDERER_URL
   if (devUrl) {
     void win.loadURL(devUrl)

@@ -38,7 +38,13 @@ export class ChatRunService {
     const machine = this.machineFor(spaceKey)
     const started = machine.apply('startAgentRun')
     if (!started.ok) {
-      throw new Error('에이전트 편집이 이미 진행 중입니다. 종료 후 다시 시도하세요.')
+      const blocking =
+        machine.current === 'pulling'
+          ? '동기화가'
+          : machine.current === 'pushing'
+            ? '업로드가'
+            : '에이전트 편집이'
+      throw new Error(`${blocking} 이미 진행 중입니다. 종료 후 다시 시도하세요.`)
     }
 
     let handle: AgentRunHandle

@@ -15,7 +15,7 @@ export function ConnectForm(): React.ReactElement {
   return (
     <form
       className="connect-card"
-      aria-label="confluence-connect"
+      aria-label={ko.aria.connect}
       onSubmit={(event) => {
         event.preventDefault()
         void connect(siteUrl, email, apiToken)

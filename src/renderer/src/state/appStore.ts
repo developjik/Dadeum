@@ -40,6 +40,7 @@ interface AppUiState {
   notice?: string
   busy: boolean
   syncingSpace?: string
+  syncingProgress?: { spaceKey: string; done: number; total: number }
   activeSpaceKey?: string
   chatMessages: Array<{ role: 'user' | 'assistant' | 'system'; text: string }>
   agentRunning: boolean
@@ -55,6 +56,7 @@ interface AppUiState {
   disconnect: () => Promise<void>
   loadSpaces: () => Promise<void>
   pullSpace: (spaceKey: string) => Promise<void>
+  cancelPull: (spaceKey: string) => Promise<void>
   loadTree: (spaceKey: string) => Promise<void>
   openPage: (path: string) => Promise<void>
   openExternal: (url: string) => Promise<void>
@@ -96,6 +98,44 @@ function appendSystemMessage(text: string): void {
   useAppStore.setState({ chatMessages: [...chatMessages, { role: 'system', text }] })
 }
 
+/** main → sync:event의 auth-error 변형 판별(토큰 만료 안내). */
+function isAuthErrorEvent(payload: unknown): boolean {
+  return (
+    typeof payload === 'object' &&
+    payload !== null &&
+    'type' in payload &&
+    payload.type === 'auth-error'
+  )
+}
+
+function spaceKeyOfAuthError(payload: unknown): string {
+  if (typeof payload === 'object' && payload !== null && 'spaceKey' in payload) {
+    const key = payload.spaceKey
+    return typeof key === 'string' ? key : ''
+  }
+  return ''
+}
+
+/** main → sync:event의 pull-progress 변형(진행률 표시용). */
+function pullProgressOf(
+  payload: unknown,
+): { spaceKey: string; done: number; total: number } | null {
+  if (
+    typeof payload !== 'object' ||
+    payload === null ||
+    !('type' in payload) ||
+    payload.type !== 'pull-progress'
+  ) {
+    return null
+  }
+  if (!('spaceKey' in payload && 'done' in payload && 'total' in payload)) return null
+  const { spaceKey, done, total } = payload
+  if (typeof spaceKey !== 'string' || typeof done !== 'number' || typeof total !== 'number') {
+    return null
+  }
+  return { spaceKey, done, total }
+}
+
 /**
  * main 이벤트 구독(앱 최초 연결 시 1회) — 에이전트 런 + 동기화 폴링 알림.
  * 에이전트 이벤트는 run의 스페이스가 현재 활성 스페이스일 때만 채팅에 기록한다
@@ -135,6 +175,16 @@ export function ensureAgentEventSubscription(): void {
   }
   if (!syncUnsubscribe) {
     syncUnsubscribe = window.confluenceLocal.onSyncEvent((payload) => {
+      const progress = pullProgressOf(payload)
+      if (progress) {
+        useAppStore.setState({ syncingProgress: progress })
+        return
+      }
+      // 401 감지: 폴링이 조용히 죽지 않게 사용자에게 재연결을 요청한다
+      if (isAuthErrorEvent(payload)) {
+        useAppStore.setState({ error: ko.sync.authExpired(spaceKeyOfAuthError(payload)) })
+        return
+      }
       const event = payload as SyncPollEvent
       if (event?.type !== 'poll') return
       const state = useAppStore.getState()
@@ -242,7 +292,7 @@ export const useAppStore = create<AppUiState>((set, get) => ({
   },
 
   pullSpace: async (spaceKey) => {
-    set({ busy: true, syncingSpace: spaceKey, error: undefined })
+    set({ busy: true, syncingSpace: spaceKey, syncingProgress: undefined, error: undefined })
     try {
       const result = await api<{
         spaceKey: string
@@ -265,7 +315,15 @@ export const useAppStore = create<AppUiState>((set, get) => ({
     } catch (cause) {
       set({ error: String(cause instanceof Error ? cause.message : cause) })
     } finally {
-      set({ busy: false, syncingSpace: undefined })
+      set({ busy: false, syncingSpace: undefined, syncingProgress: undefined })
+    }
+  },
+
+  cancelPull: async (spaceKey) => {
+    try {
+      await api('pull:cancel', { spaceKey })
+    } catch (cause) {
+      set({ error: String(cause instanceof Error ? cause.message : cause) })
     }
   },
 
@@ -318,6 +376,8 @@ export const useAppStore = create<AppUiState>((set, get) => ({
     try {
       const outcome = await api<PushOutcome>('push:approve', { spaceKey, paths })
       await get().loadTree(spaceKey)
+      // push 결과의 충돌이 배지에 반영되게 충돌 후보도 갱신한다
+      void get().loadConflicts(spaceKey)
       // 오래된 변경 세트 재승인 방지: 업로드 결과와 함께 최신 세트로 갱신
       const changeset = await api<ChangeSet>('push:changeset', { spaceKey }).catch(() => null)
       set({ pushOutcome: outcome, changeset })
@@ -365,7 +425,11 @@ export const useAppStore = create<AppUiState>((set, get) => ({
 
   cancelAgent: async () => {
     const runId = get().activeRunId
-    if (!runId) return
+    if (!runId) {
+      // 시작 IPC 왕복 전 중지 요청 — 조용히 무시하지 않고 안내한다
+      showNotice(ko.chat.cancelPending)
+      return
+    }
     try {
       await api('agent:cancel', { runId })
     } catch (cause) {

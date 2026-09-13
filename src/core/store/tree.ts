@@ -55,6 +55,24 @@ export function buildPageTree(
     }
   }
 
+  // 다중 노드 순환(A↔B 등)은 부모가 존재해도 어느 트리에도 속하지 못한다 —
+  // '유실 없이 표시' 규약대로 부모 링크를 끊고 루트로 승격한다.
+  const attached = new Set<Work>()
+  const markAttached = (node: Work): void => {
+    attached.add(node)
+    for (const child of node.children) markAttached(child)
+  }
+  for (const root of roots) markAttached(root)
+  for (const node of nodes.values()) {
+    if (attached.has(node)) continue
+    const parent = node.parentId !== null ? nodes.get(node.parentId) : undefined
+    if (parent) {
+      parent.children = parent.children.filter((child) => child !== node)
+    }
+    roots.push(node)
+    markAttached(node)
+  }
+
   const sortTree = (list: Work[]): void => {
     list.sort((a, b) => a.title.localeCompare(b.title, 'ko'))
     for (const node of list) sortTree(node.children)

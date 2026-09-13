@@ -6,7 +6,7 @@ import { ExternalIcon } from './icons'
 export function Preview({ page }: { page: SelectedPage }): React.ReactElement {
   const openExternal = useAppStore((s) => s.openExternal)
   return (
-    <section className="preview-pane" aria-label="page-preview">
+    <section className="preview-pane" aria-label={ko.aria.pagePreview}>
       <header className="preview-pane__header">
         <h1 className="preview-pane__title">{page.title}</h1>
         <span className="badge badge--neutral">v{page.version}</span>

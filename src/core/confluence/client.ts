@@ -55,6 +55,8 @@ export function parseRetryAfterMs(header: string | null | undefined): number | u
   if (!Number.isNaN(asDate)) return Math.max(0, asDate - Date.now())
   return undefined
 }
+/** Retry-After 대기 상한 — 상한 없이 기다리면 상태머신이 수 시간 잠긴다. */
+const MAX_RETRY_AFTER_MS = 60_000
 
 /** _links.next 정규화: 전체 URL이면 경로만 추출하고 /wiki 이중 접두사를 제거한다. */
 function normalizeCursorPath(next: string): string {
@@ -137,7 +139,7 @@ export class ConfluenceClient {
           retryAfterMs,
         )
         if (attempt < this.maxRetries) {
-          await this.sleep(retryAfterMs)
+          await this.sleep(Math.min(retryAfterMs, MAX_RETRY_AFTER_MS))
           continue
         }
         throw lastError
@@ -179,6 +181,73 @@ export class ConfluenceClient {
       return (await response.json()) as T
     }
     throw lastError ?? new ConfluenceApiError('unexpected', '재시도 소진')
+  }
+
+  /** 바이너리·multipart 요청 공용 재시도(429·5xx·네트워크 — requestJson과 동일 정책). */
+  private async fetchWithRetry(url: string, init: RequestInit): Promise<Response> {
+    let lastError: ConfluenceApiError | undefined
+    for (let attempt = 0; attempt <= this.maxRetries; attempt++) {
+      let response: Response
+      try {
+        response = await this.fetchWithTimeout(url, init)
+      } catch (cause) {
+        lastError = new ConfluenceApiError('network', `네트워크 오류: ${String(cause)}`)
+        if (attempt < this.maxRetries) {
+          await this.sleep(500 * 2 ** attempt)
+          continue
+        }
+        throw lastError
+      }
+      if (response.status === 429) {
+        const retryAfterMs =
+          parseRetryAfterMs(response.headers.get('Retry-After')) ?? 500 * 2 ** attempt
+        lastError = new ConfluenceApiError(
+          'rate_limited',
+          'Confluence 요청 한도 초과(429)',
+          429,
+          retryAfterMs,
+        )
+        if (attempt < this.maxRetries) {
+          await this.sleep(Math.min(retryAfterMs, MAX_RETRY_AFTER_MS))
+          continue
+        }
+        throw lastError
+      }
+      if (response.status >= 500) {
+        lastError = new ConfluenceApiError(
+          'server',
+          `Confluence 서버 오류(${response.status})`,
+          response.status,
+        )
+        if (attempt < this.maxRetries) {
+          await this.sleep(500 * 2 ** attempt)
+          continue
+        }
+        throw lastError
+      }
+      return response
+    }
+    throw lastError ?? new ConfluenceApiError('unexpected', '재시도 소진')
+  }
+
+  /** 절대 URL 첨부는 연결된 사이트 origin만 허용 — 자격증명이 제3자 origin으로 전송되는 것을 차단. */
+  private resolveDownloadUrl(downloadPath: string): string {
+    if (!downloadPath.startsWith('http')) {
+      return `${this.identity.baseUrl}${downloadPath.startsWith('/wiki') ? '' : '/wiki'}${downloadPath}`
+    }
+    let target: URL
+    try {
+      target = new URL(downloadPath)
+    } catch {
+      throw new ConfluenceApiError('unexpected', `잘못된 첨부 URL: ${downloadPath}`)
+    }
+    if (target.origin !== new URL(this.identity.baseUrl).origin) {
+      throw new ConfluenceApiError(
+        'unexpected',
+        `연결되지 않은 origin의 첨부 URL입니다: ${target.origin}`,
+      )
+    }
+    return downloadPath
   }
 
   /** 스페이스 목록 단일 페이지 조회(커서는 응답 _links.next에서 추출한 절대/상대 경로). */
@@ -419,7 +488,7 @@ export class ConfluenceClient {
   ): Promise<{ id: string }> {
     const form = new FormData()
     form.append('file', new Blob([new Uint8Array(content)], { type: mediaType }), fileName)
-    const response = await this.fetchWithTimeout(
+    const response = await this.fetchWithRetry(
       `${this.identity.baseUrl}/wiki/rest/api/content/${pageId}/child/attachment`,
       {
         method: 'POST',
@@ -445,11 +514,9 @@ export class ConfluenceClient {
 
   /** 첨부 바이너리 다운로드(downloadPath: listAttachments가 반환한 상대 경로). */
   async downloadAttachment(downloadPath: string): Promise<ArrayBuffer> {
-    const url = downloadPath.startsWith('http')
-      ? downloadPath
-      : `${this.identity.baseUrl}${downloadPath.startsWith('/wiki') ? '' : '/wiki'}${downloadPath}`
+    const url = this.resolveDownloadUrl(downloadPath)
     const headers = { Authorization: buildBasicAuthHeader(this.identity.email, this.token) }
-    const response = await this.fetchWithTimeout(url, { headers })
+    const response = await this.fetchWithRetry(url, { headers })
     if (!response.ok) {
       throw new ConfluenceApiError(
         'unexpected',
@@ -465,7 +532,7 @@ export class ConfluenceClient {
    * 로컬에서 삭제된 첨부를 원격에서도 정리할 때 사용한다.
    */
   async deleteAttachment(attachmentId: string): Promise<void> {
-    const response = await this.fetchWithTimeout(
+    const response = await this.fetchWithRetry(
       `${this.identity.baseUrl}/wiki/rest/api/content/${attachmentId}`,
       {
         method: 'DELETE',

@@ -1,10 +1,11 @@
 import { join } from 'node:path'
 import type { ConfluenceClient, ConfluenceSpace } from '../../core/confluence/client'
+import { ConfluenceApiError } from '../../core/confluence/types'
 import type { SyncStateDb } from '../../core/store/syncState'
 import { PollScheduler, realTimer } from '../../core/sync/pollScheduler'
 import { reconcilePageIds } from '../../core/sync/reconciler'
 import { machineFor } from './machines'
-import { pullIncremental } from './pullIncremental'
+import { type IncrementalPullResult, pullIncremental } from './pullIncremental'
 import { broadcastSyncEvent } from './syncNotifier'
 
 /**
@@ -44,13 +45,23 @@ export function startAutoPull(options: {
     },
     onPoll: async () => {
       const sinceIso = beginIncrementalPull(db, space.key)
-      const result = await pullIncremental({
-        client,
-        space,
-        workspaceRoot,
-        db,
-        sinceIso,
-      })
+      let result: IncrementalPullResult
+      try {
+        result = await pullIncremental({
+          client,
+          space,
+          workspaceRoot,
+          db,
+          sinceIso,
+        })
+      } catch (cause) {
+        // 401(토큰 폐기·교체)은 폴링이 영원히 조용히 실패하지 않게 즉시 중단+안내한다
+        if (cause instanceof ConfluenceApiError && cause.kind === 'unauthorized') {
+          stopAutoPull(space.key)
+          broadcastSyncEvent({ type: 'auth-error', spaceKey: space.key, message: cause.message })
+        }
+        throw cause
+      }
 
       // 원격 삭제 대차(F-3): 원격 목록에 없는 로컬 페이지를 tombstone(.sync/trash 이동)
       let tombstoned = 0
@@ -70,7 +81,8 @@ export function startAutoPull(options: {
       }
 
       const machine = machineFor(space.key)
-      if (machine.current === 'idle' && !machine.hasDeferredPull()) {
+      // 연기됐던 pull은 폴링 1회 성공 후 플래그를 정리한다(앱 수명 내 잔존 방지)
+      if (machine.current === 'idle' && machine.hasDeferredPull()) {
         machine.clearDeferredPull()
       }
 

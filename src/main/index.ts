@@ -7,12 +7,15 @@ import { registerIpcHandlers } from './ipc'
 import { createMainWindow } from './window'
 
 const isDev = !!process.env.ELECTRON_RENDERER_URL
+// 빌드 산출물 기준 경로 확인용(디버그/스모크).
+const rendererDir = join(__dirname, '../renderer')
 
 // 새 창(window.open) 전면 차단 — 모든 외부 링크는 OS 브라우저로만 연다.
 app.on('web-contents-created', (_event, contents) => {
   contents.setWindowOpenHandler(() => ({ action: 'deny' }))
   contents.on('will-navigate', (event, url) => {
-    if (!isAllowedNavigation(url, { dev: isDev })) event.preventDefault()
+    if (!isAllowedNavigation(url, { dev: isDev, allowedFilePathPrefix: rendererDir }))
+      event.preventDefault()
   })
 })
 

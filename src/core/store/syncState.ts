@@ -90,6 +90,14 @@ export class SyncStateDb {
         started_at TEXT NOT NULL
       );
     `)
+    // 스키마 버전 스탬프 — 향후 변경은 user_version 기반 순차 마이그레이션 단계를 추가한다
+    // (v1은 전 테이블이 IF NOT EXISTS 멱등 생성이라 기존 워크스페이스와 호환).
+    this.db.pragma('user_version = 1')
+  }
+
+  /** 여러 쓰기를 하나의 트랜잭션으로 묶는다 — 대량 pull의 문장별 fsync 병목 감소. */
+  runInTransaction<T>(fn: () => T): T {
+    return this.db.transaction(fn)()
   }
 
   close(): void {

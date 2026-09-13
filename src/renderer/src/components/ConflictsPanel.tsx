@@ -13,7 +13,7 @@ export function ConflictsPanel({ spaceKey }: { spaceKey: string }): React.ReactE
   const [confirmingOverwrite, setConfirmingOverwrite] = useState<string | null>(null)
 
   return (
-    <section className="conflict-pane" aria-label="conflicts">
+    <section className="conflict-pane" aria-label={ko.aria.conflicts}>
       <div className="conflict-pane__title">
         <AlertIcon size={16} />
         {ko.conflict.list}

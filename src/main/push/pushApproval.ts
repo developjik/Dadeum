@@ -53,40 +53,59 @@ export async function pushApproved(options: {
     spaceId,
   })
 
-  // 2. 첨부 업로드(페이지 push와 무관하게 승인된 첨부는 소유 페이지 pageId로 업로드)
-  for (const attPath of attachmentPaths) {
-    try {
-      const ownerIndex = ownerIndexPath(attPath)
-      const ownerAbs = join(workspaceRoot, ownerIndex)
-      if (!existsSync(ownerAbs)) {
-        outcome.failed.push({ path: attPath, error: '소유 페이지 index.md를 찾을 수 없습니다' })
-        continue
-      }
-      const pageId = parsePageFile(readFileSync(ownerAbs, 'utf8')).meta.pageId
-      const content = readFileSync(join(workspaceRoot, attPath))
-      // F-2 재검증: 스냅샷 해시와 현재 바이트 대조(페이지 파이프라인과 동일 기준)
-      const snapEntry = snapshot.entries.get(attPath)
-      if (snapEntry && snapEntry.hash !== fileHashOf(content)) {
-        outcome.failed.push({
-          path: attPath,
-          error: '승인 후 첨부가 변경되었습니다. 다시 검토하고 승인하세요.',
-        })
-        continue
-      }
-      await client.uploadAttachment(pageId, basename(attPath), content, 'application/octet-stream')
-      db.upsertAttachment({
-        pageId,
-        fileName: basename(attPath),
-        mediaType: 'application/octet-stream',
-        fileHash: fileHashOf(content),
-      })
-      outcome.uploaded.push({ path: attPath, pageId, newVersion: -1 })
-    } catch (cause) {
+  // 2. 첨부 업로드 — 상태머신 push 락 '내부'에서 실행한다(에이전트 동시 편집·이중 push 차단)
+  const startedAttachments = machine.apply('startPush')
+  if (!startedAttachments.ok) {
+    for (const attPath of attachmentPaths) {
       outcome.failed.push({
         path: attPath,
-        error: String(cause instanceof Error ? cause.message : cause),
+        error: '동기화 또는 에이전트 실행 중이라 첨부를 업로드할 수 없습니다',
       })
     }
+    return outcome
+  }
+  try {
+    for (const attPath of attachmentPaths) {
+      try {
+        const ownerIndex = ownerIndexPath(attPath)
+        const ownerAbs = join(workspaceRoot, ownerIndex)
+        if (!existsSync(ownerAbs)) {
+          outcome.failed.push({ path: attPath, error: '소유 페이지 index.md를 찾을 수 없습니다' })
+          continue
+        }
+        const pageId = parsePageFile(readFileSync(ownerAbs, 'utf8')).meta.pageId
+        const content = readFileSync(join(workspaceRoot, attPath))
+        // F-2 재검증: 스냅샷 해시와 현재 바이트 대조(페이지 파이프라인과 동일 기준)
+        const snapEntry = snapshot.entries.get(attPath)
+        if (snapEntry && snapEntry.hash !== fileHashOf(content)) {
+          outcome.failed.push({
+            path: attPath,
+            error: '승인 후 첨부가 변경되었습니다. 다시 검토하고 승인하세요.',
+          })
+          continue
+        }
+        await client.uploadAttachment(
+          pageId,
+          basename(attPath),
+          content,
+          'application/octet-stream',
+        )
+        db.upsertAttachment({
+          pageId,
+          fileName: basename(attPath),
+          mediaType: 'application/octet-stream',
+          fileHash: fileHashOf(content),
+        })
+        outcome.uploaded.push({ path: attPath, pageId, newVersion: -1 })
+      } catch (cause) {
+        outcome.failed.push({
+          path: attPath,
+          error: String(cause instanceof Error ? cause.message : cause),
+        })
+      }
+    }
+  } finally {
+    machine.apply('endPush')
   }
 
   return outcome

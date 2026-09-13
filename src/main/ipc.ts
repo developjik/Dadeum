@@ -12,9 +12,25 @@ export function registerIpcHandler<C extends IpcChannel>(
   handler: (payload: unknown, sender: Electron.WebContents) => unknown,
 ): void {
   assertWhitelistedChannel(channel)
-  ipcMain.handle(channel, (event, payload: unknown) => {
+  ipcMain.handle(channel, async (event, payload: unknown) => {
     noteSyncSender(event.sender)
-    return handler(payload, event.sender)
+    try {
+      return await handler(payload, event.sender)
+    } catch (cause) {
+      // Electron 직렬화는 Error를 message 문자열로 평탄화한다 — kind/status를
+      // JSON 마커로 실어 보내고 preload가 Error로 재조립한다(렌더러 오류 UX용).
+      const error = cause instanceof Error ? cause : new Error(String(cause))
+      const enriched: Record<string, unknown> = {
+        __ipcError: true,
+        name: error.name,
+        message: error.message,
+      }
+      const kind = (error as { kind?: unknown }).kind
+      const status = (error as { status?: unknown }).status
+      if (typeof kind === 'string') enriched.kind = kind
+      if (typeof status === 'number') enriched.status = status
+      throw new Error(JSON.stringify(enriched))
+    }
   })
 }
 

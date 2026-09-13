@@ -21,6 +21,7 @@ export const IPC_CHANNELS = [
   'conflict:list',
   'conflict:resolve',
   'spaces:poll',
+  'pull:cancel',
 ] as const
 
 export type IpcChannel = (typeof IPC_CHANNELS)[number]

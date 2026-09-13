@@ -49,8 +49,21 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
     : 0
   const missingCount = changeset?.missing.length ?? 0
 
+  // changeset 경로에 없는 선택(자동 재검사로 사라진 항목)은 표시·승인에서 제외한다
+  // — 죽은 경로가 push:approve 전체를 ENOENT로 실패시키지 않게 한다.
+  const changesetPaths = new Set(
+    changeset
+      ? [
+          ...changeset.modified.map((page) => page.path),
+          ...changeset.added.map((page) => page.path),
+          ...changeset.attachments.map((file) => file.path),
+        ]
+      : [],
+  )
+  const validSelected = new Set([...selected].filter((path) => changesetPaths.has(path)))
+
   return (
-    <section className="review-pane" aria-label="upload-review">
+    <section className="review-pane" aria-label={ko.aria.uploadReview}>
       <div className="review-pane__toolbar">
         <div className="review-pane__summary">
           {changeset ? (
@@ -103,7 +116,7 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
                   <li key={page.path} className="cs-item">
                     <CheckItem
                       path={page.path}
-                      checked={selected.has(page.path)}
+                      checked={validSelected.has(page.path)}
                       onToggle={() => toggle(page.path)}
                     >
                       <span className="cs-item__path">{page.path}</span>
@@ -131,7 +144,7 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
                   <li key={page.path} className="cs-item">
                     <CheckItem
                       path={page.path}
-                      checked={selected.has(page.path)}
+                      checked={validSelected.has(page.path)}
                       onToggle={() => toggle(page.path)}
                     >
                       <span className="cs-item__label">{page.title}</span>
@@ -152,7 +165,7 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
                   <li key={attachment.path} className="cs-item">
                     <CheckItem
                       path={attachment.path}
-                      checked={selected.has(attachment.path)}
+                      checked={validSelected.has(attachment.path)}
                       onToggle={() => toggle(attachment.path)}
                     >
                       <span className="cs-item__label">{attachment.fileName}</span>
@@ -184,15 +197,13 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
           ) : null}
 
           <div className="review-actions">
-            <span className="review-actions__hint">{ko.review.selectedCount(selected.size)}</span>
+            <span className="review-actions__hint">
+              {ko.review.selectedCount(validSelected.size)}
+            </span>
             {confirming ? (
-              <div
-                className="review-actions__confirm"
-                role="alertdialog"
-                aria-label="confirm-upload"
-              >
+              <fieldset className="review-actions__confirm" aria-label={ko.aria.confirmUpload}>
                 <span className="review-actions__confirm-text">
-                  {ko.review.confirmUpload(selected.size)}
+                  {ko.review.confirmUpload(validSelected.size)}
                 </span>
                 <button
                   type="button"
@@ -201,7 +212,7 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
                   onClick={() => {
                     setConfirming(false)
                     void (async () => {
-                      await approveUpload(spaceKey, [...selected])
+                      await approveUpload(spaceKey, [...validSelected])
                       setSelected(new Set())
                     })()
                   }}
@@ -216,12 +227,12 @@ export function ReviewPanel({ spaceKey }: { spaceKey: string }): React.ReactElem
                 >
                   {ko.common.cancel}
                 </button>
-              </div>
+              </fieldset>
             ) : (
               <button
                 type="button"
                 className="btn btn--primary"
-                disabled={busy || selected.size === 0}
+                disabled={busy || validSelected.size === 0}
                 onClick={() => setConfirming(true)}
               >
                 {ko.review.approve}

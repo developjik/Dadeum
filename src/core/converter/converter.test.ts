@@ -205,3 +205,11 @@ describe('왕복 하드닝 2(P1 — 다중 에이전트 리뷰)', () => {
     expectRoundTripLossless('<p>윗줄<br/>===</p>')
   })
 })
+
+describe('순서 목록 시작 번호(P3)', () => {
+  it('ol start가 왕복에서 보존된다', () => {
+    const storage = '<ol start="4"><li>넷째</li><li>다섯째</li></ol>'
+    expectRoundTripLossless(storage)
+    expect(markdownToStorage('4. 넷째\n5. 다섯째')).toContain('<ol start="4">')
+  })
+})

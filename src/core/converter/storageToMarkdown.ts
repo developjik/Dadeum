@@ -97,8 +97,12 @@ function convertBlock(node: Node, context: ConversionContext, depth = 0): string
       return `${'#'.repeat(level)} ${convertInlineChildren(node, context).trim()}`
     }
     case 'ul':
-    case 'ol':
-      return convertList(node, context, localName(node) === 'ol' ? 1 : undefined, depth)
+      return convertList(node, context, undefined, depth)
+    case 'ol': {
+      // <ol start="N">은 마크다운 'N. ' 번호로 보존된다(remark-gfm start 지원)
+      const start = Number(node.getAttribute('start') ?? 1)
+      return convertList(node, context, Number.isFinite(start) && start > 0 ? start : 1, depth)
+    }
     case 'blockquote': {
       const inner = Array.from(node.childNodes)
         .map((child) => convertBlock(child, context, depth + 1))
@@ -144,7 +148,7 @@ function convertInline(node: Node, context: ConversionContext, depth = 0): strin
   if (!isElement(node)) return ''
 
   const name = localName(node)
-  if (!isNamespaced(node) && INLINE_WHITELIST.has(name)) {
+  if (depth <= MAX_CONVERT_DEPTH && !isNamespaced(node) && INLINE_WHITELIST.has(name)) {
     const inner = convertInlineChildren(node, context, depth + 1)
     switch (name) {
       case 'strong':

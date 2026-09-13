@@ -8,7 +8,8 @@
  * - GrantFileProtocolExtraPrivileges는 유지해야 한다: renderer를 file://로 로드하는
  *   electron-vite 기본 구조라 끄면 renderer가 ERR_FILE_NOT_FOUND로 실패한다(검증됨).
  */
-const { join } = require('node:path')
+const { existsSync, readdirSync, rmSync } = require('node:fs')
+const { Arch } = require('electron-builder')
 const { flipFuses, FuseVersion, FuseV1Options } = require('@electron/fuses')
 
 function executablePath(context) {
@@ -41,4 +42,34 @@ module.exports = async function afterPack(context) {
   console.log(
     `[afterPack] fuses flipped: ${JSON.stringify(flipped)} (${context.electronPlatformName})`,
   )
+
+  // better-sqlite3 v13 prebuilds가 8개 플랫폼 바이너리를 전부 탑재한다 —
+  // 빌드 대상 플랫폼/아키텍처 바이너리만 남겨 산출물을 줄인다(~14MB/아키텍처).
+  const platformName =
+    context.electronPlatformName === 'win32'
+      ? 'win32'
+      : context.electronPlatformName === 'darwin'
+        ? 'darwin'
+        : 'linux'
+  const archName =
+    context.arch === Arch.arm64 ? 'arm64' : context.arch === Arch.x64 ? 'x64' : 'ia32'
+  const keepSuffix = `-${platformName}-${archName}.node`
+  const prebuildsDir = join(
+    context.appOutDir,
+    'resources',
+    'app.asar.unpacked',
+    'node_modules',
+    'better-sqlite3',
+    'prebuilds',
+  )
+  if (existsSync(prebuildsDir)) {
+    const universal = context.arch === Arch.universal
+    for (const entry of readdirSync(prebuildsDir)) {
+      if (!entry.endsWith('.node')) continue
+      if (universal && entry.includes(`-${platformName}-`)) continue
+      if (entry.endsWith(keepSuffix)) continue
+      rmSync(join(prebuildsDir, entry))
+    }
+    console.log(`[afterPack] prebuilds pruned (keep: ${keepSuffix})`)
+  }
 }

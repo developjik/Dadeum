@@ -5,14 +5,17 @@ import type { WebContents } from 'electron'
  * 폴링 결과(갱신·dirty 보호·tombstone)를 UI에 알려 충돌 후보·트리가 스스로 갱신되게 한다.
  * 마지막에 활동한 창을 브로드캐스트 대상으로 유지한다(ipc.ts가 sender를 등록).
  */
-export interface SyncEvent {
-  type: 'poll'
-  spaceKey: string
-  updated: number
-  skippedDirty: number
-  tombstoned: number
-  failed: number
-}
+export type SyncEvent =
+  | {
+      type: 'poll'
+      spaceKey: string
+      updated: number
+      skippedDirty: number
+      tombstoned: number
+      failed: number
+    }
+  | { type: 'auth-error'; spaceKey: string; message: string }
+  | { type: 'pull-progress'; spaceKey: string; done: number; total: number }
 
 let sender: WebContents | null = null
 

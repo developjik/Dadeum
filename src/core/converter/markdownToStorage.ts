@@ -132,7 +132,11 @@ function convertList(node: List, ctx: CarrierRegistry): string {
       return `<li>${directXml}${nested.join('')}</li>`
     })
     .join('')
-  return `<${tag}>${items}</${tag}>`
+  const opening =
+    tag === 'ol' && node.start !== null && node.start !== undefined && node.start > 1
+      ? `<${tag} start="${node.start}">`
+      : `<${tag}>`
+  return `${opening}${items}</${tag}>`
 }
 
 function convertPhrasing(children: PhrasingContent[], ctx: CarrierRegistry): string {

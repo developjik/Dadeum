@@ -243,4 +243,30 @@ describe('풀pull 페이지 단위 격리(P1)', () => {
     expect(db.lastPullStartAt('SINCET')).toBeTruthy()
     db.close()
   })
+
+  it('tombstone 시 첨부 디렉터리도 함께 trash로 이동한다', async () => {
+    const { root, db } = setup('ATTMOV')
+    const fake: MutableFake = {
+      pageSummaries: [
+        { id: '770001', title: '첨부페이지', version: { number: 1 }, parentId: null },
+      ],
+      storage: { '770001': '<p>본문</p>' },
+    }
+    const client = fakeClient(fake, 'sp-attmov')
+    const space = { id: 'sp-attmov', key: 'ATTMOV', name: '테스트' }
+    await pullFullSpace({ client, space, workspaceRoot: root, db })
+    const attDir = join(root, 'spaces/ATTMOV/첨부페이지/attachments')
+    mkdirSync(attDir, { recursive: true })
+    writeFileSync(join(attDir, 'image.png'), 'PNG')
+
+    fake.pageSummaries = []
+    const second = await pullFullSpace({ client, space, workspaceRoot: root, db })
+
+    expect(second.tombstoned).toBe(1)
+    expect(existsSync(attDir)).toBe(false)
+    const moved = readdirSync(join(root, '.sync/trash'), { recursive: true }).map(String)
+    expect(moved.some((entry) => entry.includes('index.md'))).toBe(true)
+    expect(moved.some((entry) => entry.includes('image.png'))).toBe(true)
+    db.close()
+  })
 })
